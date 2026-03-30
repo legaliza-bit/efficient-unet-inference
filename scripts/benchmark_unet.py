@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import click
+import numpy as np
 import segmentation_models_pytorch as smp
 import torch
 from models import NUM_CLASSES, get_experiment
@@ -63,18 +64,12 @@ class OxfordPetSegmentationDataset(Dataset):
         encoder_name: str,
         encoder_weights: str | None,
     ):
-        preprocess_input = smp.encoders.get_preprocessing_fn(
+        self.preprocess_input = smp.encoders.get_preprocessing_fn(
             encoder_name=encoder_name,
             pretrained=encoder_weights,
         )
-        self.image_transform = transforms.Compose(
-            [
-                transforms.Resize(
-                    (image_size, image_size), interpolation=InterpolationMode.BILINEAR
-                ),
-                transforms.ToTensor(),
-                transforms.Lambda(preprocess_input),
-            ]
+        self.image_resize = transforms.Resize(
+            (image_size, image_size), interpolation=InterpolationMode.BILINEAR
         )
         self.mask_transform = transforms.Compose(
             [
@@ -96,7 +91,10 @@ class OxfordPetSegmentationDataset(Dataset):
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
         image, mask = self.dataset[index]
-        image = self.image_transform(image)
+        image = self.image_resize(image)
+        image = np.asarray(image).astype("float32")
+        image = self.preprocess_input(image)
+        image = torch.from_numpy(image.transpose(2, 0, 1)).float().contiguous()
         mask = self.mask_transform(mask).squeeze(0).long()
         mask = (mask != 2).long()
         return image, mask
