@@ -63,7 +63,7 @@ class OxfordPetSegmentationDataset(Dataset):
         encoder_name: str,
         encoder_weights: str | None,
     ):
-        preprocessing_params = smp.encoders.get_preprocessing_params(
+        preprocess_input = smp.encoders.get_preprocessing_fn(
             encoder_name=encoder_name,
             pretrained=encoder_weights,
         )
@@ -73,10 +73,7 @@ class OxfordPetSegmentationDataset(Dataset):
                     (image_size, image_size), interpolation=InterpolationMode.BILINEAR
                 ),
                 transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=preprocessing_params["mean"],
-                    std=preprocessing_params["std"],
-                ),
+                transforms.Lambda(preprocess_input),
             ]
         )
         self.mask_transform = transforms.Compose(
