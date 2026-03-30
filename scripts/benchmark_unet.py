@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import click
+import segmentation_models_pytorch as smp
 import torch
 from models import NUM_CLASSES, get_experiment
 from torch import nn
@@ -45,13 +46,28 @@ class QualityMetrics:
 
 
 class OxfordPetSegmentationDataset(Dataset):
-    def __init__(self, root: Path, image_size: int, download: bool):
+    def __init__(
+        self,
+        root: Path,
+        image_size: int,
+        download: bool,
+        encoder_name: str,
+        encoder_weights: str | None,
+    ):
+        preprocessing_params = smp.encoders.get_preprocessing_params(
+            encoder_name=encoder_name,
+            pretrained=encoder_weights,
+        )
         self.image_transform = transforms.Compose(
             [
                 transforms.Resize(
                     (image_size, image_size), interpolation=InterpolationMode.BILINEAR
                 ),
                 transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=preprocessing_params["mean"],
+                    std=preprocessing_params["std"],
+                ),
             ]
         )
         self.mask_transform = transforms.Compose(
@@ -92,11 +108,19 @@ def resolve_device(device_arg: str) -> torch.device:
     return torch.device(device_arg)
 
 
-def build_dataset(num_samples: int, image_size: int, download: bool) -> Dataset:
+def build_dataset(
+    num_samples: int,
+    image_size: int,
+    download: bool,
+    encoder_name: str,
+    encoder_weights: str | None,
+) -> Dataset:
     dataset: Dataset = OxfordPetSegmentationDataset(
         root=DATA_DIR,
         image_size=image_size,
         download=download,
+        encoder_name=encoder_name,
+        encoder_weights=encoder_weights,
     )
     return Subset(dataset, range(min(len(dataset), num_samples)))
 
@@ -266,6 +290,8 @@ def main(
         num_samples=num_samples,
         image_size=image_size,
         download=download,
+        encoder_name=experiment.encoder_name,
+        encoder_weights=experiment.encoder_weights,
     )
     dataloader = build_dataloader(
         dataset=dataset,
