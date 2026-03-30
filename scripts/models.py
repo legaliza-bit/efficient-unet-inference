@@ -28,6 +28,13 @@ def build_pretrained_oxford_pet_unet_fp16(device: torch.device) -> nn.Module:
     return model
 
 
+def build_pretrained_oxford_pet_unet_fp32(device: torch.device) -> nn.Module:
+    model = smp.from_pretrained(PRETRAINED_CHECKPOINT)
+    model.eval()
+    model.to(device=device)
+    return model
+
+
 def build_compiled_pretrained_oxford_pet_unet_fp16(device: torch.device) -> nn.Module:
     model = build_pretrained_oxford_pet_unet_fp16(device)
     return torch.compile(model, backend="inductor", mode="max-autotune")
@@ -35,6 +42,14 @@ def build_compiled_pretrained_oxford_pet_unet_fp16(device: torch.device) -> nn.M
 
 def get_experiment(exp_name: str) -> Experiment:
     experiments = {
+        "baseline_fp32": Experiment(
+            name="baseline_fp32",
+            dtype=torch.float32,
+            build_model=build_pretrained_oxford_pet_unet_fp32,
+            architecture="smp.Unet",
+            encoder_name=PRETRAINED_ENCODER_NAME,
+            encoder_weights=ENCODER_WEIGHTS,
+        ),
         "baseline_fp16": Experiment(
             name="baseline_fp16",
             dtype=torch.float16,

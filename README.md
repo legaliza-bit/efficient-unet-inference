@@ -8,6 +8,7 @@
 - один запуск бенчмарка = один `json` = одна строка будущей таблицы.
 
 Сейчас доступны эксперименты:
+- `baseline_fp32`
 - `baseline_fp16`
 - `compile`
 
@@ -22,6 +23,20 @@ source .venv/bin/activate
 ## Запуск
 
 Готовый `Unet` checkpoint на Oxford Pet:
+
+```bash
+python scripts/benchmark_unet.py \
+  --exp-name baseline_fp32 \
+  --download \
+  --batch-size 8 \
+  --num-samples 64 \
+  --image-size 256 \
+  --warmup-steps 5 \
+  --device cuda \
+  --seed 42
+```
+
+Pretrained `Unet` checkpoint в `fp16`:
 
 ```bash
 python scripts/benchmark_unet.py \

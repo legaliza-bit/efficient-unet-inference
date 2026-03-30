@@ -285,7 +285,7 @@ def run_benchmark(
 @click.command()
 @click.option(
     "--exp-name",
-    type=click.Choice(["baseline_fp16", "compile"], case_sensitive=True),
+    type=click.Choice(["baseline_fp32", "baseline_fp16", "compile"], case_sensitive=True),
     default="baseline_fp16",
     show_default=True,
 )
