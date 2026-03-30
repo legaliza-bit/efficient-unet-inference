@@ -1,6 +1,6 @@
 # UNet Inference Benchmark
 
-## 1. Постановка задачи
+## Постановка задачи
 
 Цель проекта — измерить и сравнить end-to-end latency и throughput инференса UNet-модели на ImageNet при использовании различных техник оптимизации:
 
@@ -10,13 +10,27 @@
 
 ---
 
-## 2. Архитектура модели
+## Quickstart
+
+```bash
+docker build -t unet-bench .
+docker run --gpus all -it unet-bench
+```
+
+или без докера
+
+```bash
+uv sync
+uv run python -m src.main
+```
+
+## Архитектура модели
 
 Residual Encoder–Decoder U-Net c ResNet18 backbone для задачи мультиклассовой сегментации
 
 ---
 
-## 3. PyTorch FP16 Baseline
+## PyTorch FP16 Baseline
 
 ### Методология
 
