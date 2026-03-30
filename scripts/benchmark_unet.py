@@ -24,6 +24,7 @@ DEFAULT_NUM_WORKERS = 2
 DEFAULT_NUM_SAMPLES = 64
 DEFAULT_WARMUP_STEPS = 5
 DEFAULT_SEED = 42
+DEFAULT_MASK_MODE = "pet_plus_border"
 
 
 @dataclass
@@ -65,7 +66,9 @@ class OxfordPetSegmentationDataset(Dataset):
         download: bool,
         encoder_name: str,
         encoder_weights: str | None,
+        mask_mode: str,
     ):
+        self.mask_mode = mask_mode
         self.preprocess_input = smp.encoders.get_preprocessing_fn(
             encoder_name=encoder_name,
             pretrained=encoder_weights,
@@ -109,7 +112,10 @@ class OxfordPetSegmentationDataset(Dataset):
         image = torch.from_numpy(image.transpose(2, 0, 1)).float().contiguous()
         raw_mask = self.mask_transform(mask).squeeze(0).long()
 
-        mask = (raw_mask != 2).long()
+        if self.mask_mode == "pet_only":
+            mask = (raw_mask == 1).long()
+        else:
+            mask = (raw_mask != 2).long()
         return image, mask
 
 
@@ -131,6 +137,7 @@ def build_dataset(
     download: bool,
     encoder_name: str,
     encoder_weights: str | None,
+    mask_mode: str,
 ) -> Dataset:
     dataset: Dataset = OxfordPetSegmentationDataset(
         root=DATA_DIR,
@@ -138,6 +145,7 @@ def build_dataset(
         download=download,
         encoder_name=encoder_name,
         encoder_weights=encoder_weights,
+        mask_mode=mask_mode,
     )
     return Subset(dataset, range(min(len(dataset), num_samples)))
 
@@ -308,6 +316,12 @@ def run_benchmark(
 @click.option(
     "--warmup-steps", type=int, default=DEFAULT_WARMUP_STEPS, show_default=True
 )
+@click.option(
+    "--mask-mode",
+    type=click.Choice(["pet_only", "pet_plus_border"], case_sensitive=True),
+    default=DEFAULT_MASK_MODE,
+    show_default=True,
+)
 @click.option("--device", type=str, default="cuda", show_default=True)
 @click.option("--seed", type=int, default=DEFAULT_SEED, show_default=True)
 def main(
@@ -318,6 +332,7 @@ def main(
     image_size: int,
     num_samples: int,
     warmup_steps: int,
+    mask_mode: str,
     device: str,
     seed: int,
 ) -> None:
@@ -334,6 +349,7 @@ def main(
         download=download,
         encoder_name=experiment.encoder_name,
         encoder_weights=experiment.encoder_weights,
+        mask_mode=mask_mode,
     )
     dataloader = build_dataloader(
         dataset=dataset,
@@ -365,6 +381,7 @@ def main(
             "dtype": str(experiment.dtype),
             "image_size": image_size,
             "num_samples": len(dataset),
+            "mask_mode": mask_mode,
         },
         "perf_metrics": asdict(perf_metrics),
         "quality_metrics": asdict(quality_metrics),

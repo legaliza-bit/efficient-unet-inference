@@ -73,3 +73,7 @@ Quality-метрики сейчас:
 - `pixel_accuracy`
 - `iou`
 - `dice`
+
+Режим бинаризации маски можно переключать через `--mask-mode`:
+- `pet_only`
+- `pet_plus_border`
