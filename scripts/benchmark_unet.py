@@ -92,7 +92,7 @@ class OxfordPetSegmentationDataset(Dataset):
         image, mask = self.dataset[index]
         image = self.image_transform(image)
         mask = self.mask_transform(mask).squeeze(0).long()
-        mask = (mask == 1).long()
+        mask = (mask != 2).long()
         return image, mask
 
 
