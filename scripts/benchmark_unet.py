@@ -81,14 +81,22 @@ class OxfordPetSegmentationDataset(Dataset):
                 transforms.PILToTensor(),
             ]
         )
-        self.raw_mask_preview = None
-        self.raw_mask_unique_values = None
+        self.raw_mask_preview: List[List[int]] | None = None
+        self.raw_mask_unique_values: List[int] | None = None
         self.dataset = datasets.OxfordIIITPet(
             root=str(root),
             split="test",
             target_types="segmentation",
             download=download,
         )
+        self._init_debug_preview()
+
+    def _init_debug_preview(self) -> None:
+        _, mask = self.dataset[0]
+        raw_mask = self.mask_transform(mask).squeeze(0).long()
+        preview_size = min(12, raw_mask.shape[0], raw_mask.shape[1])
+        self.raw_mask_preview = raw_mask[:preview_size, :preview_size].cpu().tolist()
+        self.raw_mask_unique_values = torch.unique(raw_mask).cpu().tolist()
 
     def __len__(self) -> int:
         return len(self.dataset)
@@ -100,13 +108,6 @@ class OxfordPetSegmentationDataset(Dataset):
         image = self.preprocess_input(image)
         image = torch.from_numpy(image.transpose(2, 0, 1)).float().contiguous()
         raw_mask = self.mask_transform(mask).squeeze(0).long()
-
-        if self.raw_mask_preview is None:
-            preview_size = min(12, raw_mask.shape[0], raw_mask.shape[1])
-            self.raw_mask_preview = (
-                raw_mask[:preview_size, :preview_size].cpu().tolist()
-            )
-            self.raw_mask_unique_values = torch.unique(raw_mask).cpu().tolist()
 
         mask = (raw_mask != 2).long()
         return image, mask
@@ -286,8 +287,8 @@ def run_benchmark(
         logits_min=logits_min,
         logits_max=logits_max,
         logits_mean=logits_sum / logits_count,
-        raw_mask_unique_values=getattr(dataset.dataset, "raw_mask_unique_values", []),
-        raw_mask_preview=getattr(dataset.dataset, "raw_mask_preview", []),
+        raw_mask_unique_values=getattr(dataset.dataset, "raw_mask_unique_values", None),
+        raw_mask_preview=getattr(dataset.dataset, "raw_mask_preview", None),
     )
     return perf_metrics, quality_metrics, debug_metrics
 
