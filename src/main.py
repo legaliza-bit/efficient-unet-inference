@@ -1,7 +1,7 @@
 import torch
 
 from src.run_benchmark import run_benchmark
-from src.config import DEVICE, CACHE_DIR, BATCH_SIZE
+from src.config import DEVICE, BATCH_SIZE
 from src.data import get_voc_dataset
 from src.finetune import finetune
 from src.models.baseline import UNetResNet18

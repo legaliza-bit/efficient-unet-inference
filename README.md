@@ -12,7 +12,7 @@
 
 ## 2. Архитектура модели
 
-TBD
+Residual Encoder–Decoder U-Net c ResNet18 backbone для задачи мультиклассовой сегментации
 
 ---
 
@@ -27,8 +27,8 @@ TBD
 
 ### Метрики
 
-- **Latency**: среднее, медиана (p50), p95, p99 по батчам
-- **Throughput**: `total_samples / total_time`
-- **Accuracy**: Top-1, Top-5 на ImageNet val
+- **Кол-во параметров модели**: 14.3M
+- **Latency**: 24.53 ± 10.91 ms (p50=22.32, p95=44.46)
+- **Throughput**: 649.0 samples/s
 
 ---
