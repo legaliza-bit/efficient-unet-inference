@@ -4,6 +4,19 @@ from torch.utils.data import Dataset
 from PIL import Image
 import numpy as np
 import torch
+from src.config import DATASET_CACHE
+
+
+def get_voc_dataset(**kwargs):
+    key = str(kwargs)
+
+    if key not in DATASET_CACHE:
+        DATASET_CACHE[key] = VOCMultiClassDataset(**kwargs)
+        print("Loaded dataset")
+    else:
+        print("Using cached dataset")
+
+    return DATASET_CACHE[key]
 
 
 class VOCMultiClassDataset(Dataset):

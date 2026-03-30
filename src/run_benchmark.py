@@ -77,8 +77,6 @@ def run_benchmark(model, dataloader, device, pipeline_name: str, num_classes: in
 
         throughput_samples_per_sec=total_samples / total_time_sec,
 
-        mean_iou=total_miou / len(dataloader),
-
         model_params_M=sum(p.numel() for p in model.parameters()) / 1e6,
         model_size_MB=get_model_size_mb(model),
     )

@@ -6,25 +6,17 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from loguru import logger
 
-from src.data import VOCMultiClassDataset
+from src.data import get_voc_dataset
 from src.utils import miou
 from src.config import IMG_SIZE, BATCH_SIZE, DEVICE, FINETUNE_EPOCHS, LR
+
 
 criterion = nn.CrossEntropyLoss(ignore_index=255)
 
 
 def finetune(model: nn.Module) -> None:
-    train_ds = VOCMultiClassDataset(
-        root="./data",
-        image_set="train",
-        img_size=IMG_SIZE
-    )
-
-    val_ds = VOCMultiClassDataset(
-        root="./data",
-        image_set="val",
-        img_size=IMG_SIZE
-    )
+    train_ds = get_voc_dataset(root="data", image_set="train")
+    val_ds = get_voc_dataset(root="data", image_set="val")
 
     train_loader = DataLoader(
         train_ds,
@@ -60,7 +52,7 @@ def finetune(model: nn.Module) -> None:
 
             optimizer.zero_grad()
 
-            with torch.amp.autocast(enabled=(DEVICE.type == "cuda")):
+            with torch.amp.autocast("cuda"):
                 preds = model(imgs)  # (B,C,H,W)
                 loss = criterion(preds, masks)
 
@@ -83,7 +75,7 @@ def finetune(model: nn.Module) -> None:
                 imgs = imgs.to(DEVICE, non_blocking=True)
                 masks = masks.to(DEVICE, non_blocking=True)
 
-                with torch.amp.autocast(enabled=(DEVICE.type == "cuda")):
+                with torch.amp.autocast("cuda"):
                     preds = model(imgs)
 
                     loss = criterion(preds, masks)

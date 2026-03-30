@@ -2,7 +2,7 @@ import torch
 
 from src.run_benchmark import run_benchmark
 from src.config import DEVICE, CACHE_DIR, BATCH_SIZE
-from src.data import VOCMultiClassDataset
+from src.data import get_voc_dataset
 from src.finetune import finetune
 from src.models.baseline import UNetResNet18
 from torch.utils.data import DataLoader
@@ -20,17 +20,8 @@ def main():
 
     print("── Loading dataset ──────────────────────────")
 
-    train_ds = VOCMultiClassDataset(
-        root=CACHE_DIR,
-        image_set="train",
-        img_size=256
-    )
-
-    val_ds = VOCMultiClassDataset(
-        root=CACHE_DIR,
-        image_set="val",
-        img_size=256
-    )
+    train_ds = get_voc_dataset(root="data", image_set="train")
+    val_ds = get_voc_dataset(root="data", image_set="val")
 
     train_loader = DataLoader(
         train_ds,
@@ -50,18 +41,14 @@ def main():
 
     print(f"Train: {len(train_ds)} | Val: {len(val_ds)}")
 
-    model = UNetResNet18(in_ch=3, base_ch=32)
+    model = UNetResNet18()
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"\nModel: UNetResNet18 | {n_params / 1e6:.1f}M params")
 
     print("\n── Fine-tuning ─────────────────────────────")
 
-    finetune(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-    )
+    finetune(model=model)
 
     print("\n── Benchmark ───────────────────────────────")
 
