@@ -45,6 +45,15 @@ class QualityMetrics:
     dice: float
 
 
+@dataclass
+class DebugMetrics:
+    mean_pred_positive_ratio: float
+    mean_target_positive_ratio: float
+    logits_min: float
+    logits_max: float
+    logits_mean: float
+
+
 class OxfordPetSegmentationDataset(Dataset):
     def __init__(
         self,
@@ -186,7 +195,7 @@ def run_benchmark(
     device: torch.device,
     dtype: torch.dtype,
     warmup_steps: int,
-) -> Tuple[PerfMetrics, QualityMetrics]:
+) -> Tuple[PerfMetrics, QualityMetrics, DebugMetrics]:
     latencies_ms: List[float] = []
     measured_images = 0
     measured_steps = 0
@@ -195,6 +204,12 @@ def run_benchmark(
         torch.float16,
         torch.bfloat16,
     )
+    pred_positive_sum = 0.0
+    target_positive_sum = 0.0
+    logits_min = math.inf
+    logits_max = -math.inf
+    logits_sum = 0.0
+    logits_count = 0
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -215,8 +230,17 @@ def run_benchmark(
                 raise RuntimeError(
                     f"Expected {NUM_CLASSES} output channel, got {logits.shape[1]}."
                 )
+            logits_cpu = logits[:, 0].detach().float().cpu()
             predictions = (torch.sigmoid(logits[:, 0]) >= 0.5).long().cpu()
-            update_confusion_matrix(confusion, predictions, masks.cpu())
+            targets_cpu = masks.cpu()
+            update_confusion_matrix(confusion, predictions, targets_cpu)
+
+            pred_positive_sum += predictions.float().mean().item()
+            target_positive_sum += targets_cpu.float().mean().item()
+            logits_min = min(logits_min, logits_cpu.min().item())
+            logits_max = max(logits_max, logits_cpu.max().item())
+            logits_sum += logits_cpu.sum().item()
+            logits_count += logits_cpu.numel()
 
             if step >= warmup_steps:
                 latencies_ms.append((end - start) * 1000.0)
@@ -248,7 +272,14 @@ def run_benchmark(
         max_memory_allocated_mb=max_memory_allocated_mb,
     )
     quality_metrics = compute_quality_metrics(confusion)
-    return perf_metrics, quality_metrics
+    debug_metrics = DebugMetrics(
+        mean_pred_positive_ratio=pred_positive_sum / len(dataloader),
+        mean_target_positive_ratio=target_positive_sum / len(dataloader),
+        logits_min=logits_min,
+        logits_max=logits_max,
+        logits_mean=logits_sum / logits_count,
+    )
+    return perf_metrics, quality_metrics, debug_metrics
 
 
 @click.command()
@@ -300,7 +331,7 @@ def main(
     )
     model = experiment.build_model(device_obj)
 
-    perf_metrics, quality_metrics = run_benchmark(
+    perf_metrics, quality_metrics, debug_metrics = run_benchmark(
         model=model,
         dataloader=dataloader,
         device=device_obj,
@@ -325,6 +356,7 @@ def main(
         },
         "perf_metrics": asdict(perf_metrics),
         "quality_metrics": asdict(quality_metrics),
+        "debug_metrics": asdict(debug_metrics),
     }
 
     output_path = ARTIFACTS_DIR / f"{experiment.name}.json"
