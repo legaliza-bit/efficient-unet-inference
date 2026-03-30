@@ -1,0 +1,33 @@
+[project]
+name = "efficient-unet-inference"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "kaggle>=2.0.0",
+    "loguru>=0.7.3",
+    "numpy>=2.4.4",
+    "pre-commit>=4.5.1",
+    "ruff>=0.15.8",
+    "segmentation-models-pytorch>=0.5.0",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+lint.select = [
+  "E",  # pycodestyle errors
+  "F",  # pyflakes
+  "I",  # import sorting
+  "B",  # bugbear
+]
+lint.ignore = [
+  "E501",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
