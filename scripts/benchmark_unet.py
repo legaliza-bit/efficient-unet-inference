@@ -53,6 +53,8 @@ class DebugMetrics:
     logits_min: float
     logits_max: float
     logits_mean: float
+    raw_mask_unique_values: List[int]
+    raw_mask_preview: List[List[int]]
 
 
 class OxfordPetSegmentationDataset(Dataset):
@@ -79,6 +81,8 @@ class OxfordPetSegmentationDataset(Dataset):
                 transforms.PILToTensor(),
             ]
         )
+        self.raw_mask_preview = None
+        self.raw_mask_unique_values = None
         self.dataset = datasets.OxfordIIITPet(
             root=str(root),
             split="test",
@@ -95,8 +99,16 @@ class OxfordPetSegmentationDataset(Dataset):
         image = np.asarray(image).astype("float32")
         image = self.preprocess_input(image)
         image = torch.from_numpy(image.transpose(2, 0, 1)).float().contiguous()
-        mask = self.mask_transform(mask).squeeze(0).long()
-        mask = (mask != 2).long()
+        raw_mask = self.mask_transform(mask).squeeze(0).long()
+
+        if self.raw_mask_preview is None:
+            preview_size = min(12, raw_mask.shape[0], raw_mask.shape[1])
+            self.raw_mask_preview = (
+                raw_mask[:preview_size, :preview_size].cpu().tolist()
+            )
+            self.raw_mask_unique_values = torch.unique(raw_mask).cpu().tolist()
+
+        mask = (raw_mask != 2).long()
         return image, mask
 
 
@@ -187,6 +199,7 @@ def compute_quality_metrics(confusion: torch.Tensor) -> QualityMetrics:
 def run_benchmark(
     model: nn.Module,
     dataloader: DataLoader,
+    dataset: Dataset,
     device: torch.device,
     dtype: torch.dtype,
     warmup_steps: int,
@@ -273,6 +286,8 @@ def run_benchmark(
         logits_min=logits_min,
         logits_max=logits_max,
         logits_mean=logits_sum / logits_count,
+        raw_mask_unique_values=getattr(dataset.dataset, "raw_mask_unique_values", []),
+        raw_mask_preview=getattr(dataset.dataset, "raw_mask_preview", []),
     )
     return perf_metrics, quality_metrics, debug_metrics
 
@@ -329,6 +344,7 @@ def main(
     perf_metrics, quality_metrics, debug_metrics = run_benchmark(
         model=model,
         dataloader=dataloader,
+        dataset=dataset,
         device=device_obj,
         dtype=experiment.dtype,
         warmup_steps=warmup_steps,
