@@ -25,7 +25,6 @@ def build_pretrained_oxford_pet_unet_fp16(device: torch.device) -> nn.Module:
     model = smp.from_pretrained(PRETRAINED_CHECKPOINT)
     model.eval()
     model.to(device=device)
-    model.to(dtype=torch.float16)
     return model
 
 
