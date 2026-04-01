@@ -14,7 +14,7 @@ criterion = nn.CrossEntropyLoss(ignore_index=255)
 
 
 def finetune(model: nn.Module) -> None:
-    full_train_ds = get_voc_dataset(root="data", image_set="train")
+    full_train_ds = get_voc_dataset(image_set="train")
 
     train_size = int(0.8 * len(full_train_ds))
     val_size = len(full_train_ds) - train_size
@@ -43,6 +43,8 @@ def finetune(model: nn.Module) -> None:
         pin_memory=True,
     )
 
+    print(f"Loaded train: {len(train_ds)} | val: {len(val_ds)} samples")
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
     scaler = torch.amp.GradScaler(enabled=(DEVICE.type == "cuda"))
 
@@ -62,7 +64,7 @@ def finetune(model: nn.Module) -> None:
             optimizer.zero_grad()
 
             with torch.amp.autocast("cuda"):
-                preds = model(imgs)  # (B,C,H,W)
+                preds = model(imgs)
                 loss = criterion(preds, masks)
 
             scaler.scale(loss).backward()

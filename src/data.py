@@ -4,7 +4,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 import numpy as np
 import torch
-from src.config import DATASET_CACHE
+from src.config import DATASET_CACHE, DATA_DIR
 
 
 def get_voc_dataset(**kwargs):
@@ -20,9 +20,11 @@ def get_voc_dataset(**kwargs):
 
 
 class VOCMultiClassDataset(Dataset):
-    def __init__(self, root, image_set="train", img_size=256):
+    def __init__(self, image_set="train", img_size=256):
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+
         self.ds = VOCSegmentation(
-            root=root,
+            root=DATA_DIR,
             year="2012",
             image_set=image_set,
             download=True

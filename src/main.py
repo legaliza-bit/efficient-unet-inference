@@ -20,7 +20,7 @@ def main():
 
     print("── Loading dataset ──────────────────────────")
 
-    test_ds = get_voc_dataset(root="data", image_set="val")
+    test_ds = get_voc_dataset(image_set="val")
 
     test_loader = DataLoader(
         test_ds,
