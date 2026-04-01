@@ -1,15 +1,14 @@
-import torch 
 from pathlib import Path
+
+import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TMP_DIR = PROJECT_ROOT / "tmp"
 DATA_DIR = PROJECT_ROOT / "data"
-CKPT_PATH = TMP_DIR / "unet_finetuned.pt"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 IMG_SIZE = 256
-BATCH_SIZE = 16
-FINETUNE_EPOCHS = 2
-LR = 1e-4
+NUM_CLASSES = 21
+BATCH_SIZES = [1, 4, 8, 16, 32, 64]
 WARMUP_ITERS = 20
-DATASET_CACHE = {}
+NUM_EVAL_SAMPLES = 200

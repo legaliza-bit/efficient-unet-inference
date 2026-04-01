@@ -7,4 +7,10 @@ venv/
 .vscode/
 .idea/
 
-tmp/
+# Data files (too large for VCS)
+data/
+
+# Build / dist artifacts
+*.egg-info/
+dist/
+build/
