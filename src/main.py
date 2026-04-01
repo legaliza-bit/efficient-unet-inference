@@ -37,7 +37,7 @@ def main():
 
     print("\n── Fine-tuning ─────────────────────────────")
 
-    finetune(model=model)
+    finetune(model=model, num_classes=21)
 
     print("\n── Benchmark ───────────────────────────────")
 
