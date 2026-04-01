@@ -10,29 +10,6 @@ import torch
 import numpy as np
 
 
-def miou(pred: torch.Tensor, target: torch.Tensor, num_classes: int = 21):
-    pred = torch.argmax(pred, dim=1)
-
-    ious = []
-
-    for cls in range(num_classes):
-        pred_c = (pred == cls)
-        target_c = (target == cls)
-
-        intersection = (pred_c & target_c).sum().float()
-        union = (pred_c | target_c).sum().float()
-
-        if union == 0:
-            continue
-
-        ious.append((intersection / union).item())
-
-    if len(ious) == 0:
-        return 0.0
-
-    return sum(ious) / len(ious)
-
-
 @dataclass
 class BenchmarkResult:
     pipeline_name: str
@@ -175,57 +152,3 @@ def reset_gpu_state() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
-
-
-@torch.no_grad()
-def compute_accuracy(
-    logits: torch.Tensor,
-    labels: torch.Tensor,
-    topk: tuple[int, ...] = (1, 5),
-) -> dict[str, float]:
-    """
-    Вычисляет top-k accuracy.
-
-    Args:
-        logits: (B, n_classes)
-        labels: (B,)
-        topk:   кортеж k-значений
-
-    Returns:
-        dict {"top1": float, "top5": float, ...}
-    """
-    maxk = max(topk)
-    batch_size = labels.size(0)
-
-    _, pred = logits.topk(maxk, dim=1, largest=True, sorted=True)
-    pred = pred.t()
-    correct = pred.eq(labels.view(1, -1).expand_as(pred))
-
-    result = {}
-    for k in topk:
-        correct_k = correct[:k].reshape(-1).float().sum(0)
-        result[f"top{k}"] = float(correct_k.mul_(100.0 / batch_size))
-    return result
-
-
-@torch.no_grad()
-def compute_output_similarity(
-    logits: torch.Tensor,
-    ref_logits: torch.Tensor,
-) -> dict[str, float]:
-    """
-    Сравнивает выходы с FP16-референсом.
-
-    Returns:
-        {"mse": float, "cosine_sim": float, "max_abs_diff": float}
-    """
-    logits_f = logits.float().flatten()
-    ref_f = ref_logits.float().flatten()
-
-    mse = float(torch.mean((logits_f - ref_f) ** 2))
-    cos = float(torch.nn.functional.cosine_similarity(
-        logits_f.unsqueeze(0), ref_f.unsqueeze(0)
-    ))
-    max_diff = float(torch.max(torch.abs(logits_f - ref_f)))
-
-    return {"mse": mse, "cosine_sim": cos, "max_abs_diff": max_diff}
