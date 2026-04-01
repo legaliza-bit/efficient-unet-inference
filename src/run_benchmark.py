@@ -10,7 +10,7 @@ def run_benchmark(model, dataloader, device, pipeline_name: str, num_classes: in
     model = model.to(device)
     model.eval()
 
-    use_fp16 = device == "cuda"
+    use_fp16 = device.type == "cuda"
 
     reset_gpu_state()
 
@@ -24,7 +24,7 @@ def run_benchmark(model, dataloader, device, pipeline_name: str, num_classes: in
     total_samples = 0
     conf_matrix = torch.zeros((num_classes, num_classes), dtype=torch.int64, device=device)
 
-    if device == "cuda":
+    if use_fp16:
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
 
@@ -35,6 +35,8 @@ def run_benchmark(model, dataloader, device, pipeline_name: str, num_classes: in
 
             if use_fp16:
                 x = x.half()
+
+            batch_size = x.size(0)
 
             if device == "cuda":
                 torch.cuda.synchronize()
@@ -49,10 +51,11 @@ def run_benchmark(model, dataloader, device, pipeline_name: str, num_classes: in
             else:
                 t0 = time.perf_counter()
                 out = model(x)
-                pred = torch.argmax(out, dim=1)
                 lat = (time.perf_counter() - t0) * 1000
 
+            pred = torch.argmax(out, dim=1)
             latencies.append(lat)
+            total_samples += batch_size
 
             mask = (y >= 0) & (y < num_classes) & (y != 255)
 

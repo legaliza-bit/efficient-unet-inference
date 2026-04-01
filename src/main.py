@@ -12,7 +12,7 @@ def main():
     print(f"Device: {DEVICE}")
 
     if DEVICE.type == "cuda":
-        print(f"GPU:    {torch.cuda.get_device_name(0)}")
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
         total_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
         print(f"Memory: {total_mem:.1f} GB")
 
