@@ -2,21 +2,31 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from loguru import logger
 
 from src.data import get_voc_dataset
 from src.utils import miou
-from src.config import IMG_SIZE, BATCH_SIZE, DEVICE, FINETUNE_EPOCHS, LR
+from src.config import BATCH_SIZE, DEVICE, FINETUNE_EPOCHS, LR
 
 
 criterion = nn.CrossEntropyLoss(ignore_index=255)
 
 
 def finetune(model: nn.Module) -> None:
-    train_ds = get_voc_dataset(root="data", image_set="train")
-    val_ds = get_voc_dataset(root="data", image_set="val")
+    full_train_ds = get_voc_dataset(root="data", image_set="train")
+
+    train_size = int(0.8 * len(full_train_ds))
+    val_size = len(full_train_ds) - train_size
+
+    generator = torch.Generator().manual_seed(42)
+
+    train_ds, val_ds = random_split(
+        full_train_ds,
+        [train_size, val_size],
+        generator=generator
+    )
 
     train_loader = DataLoader(
         train_ds,
@@ -93,6 +103,6 @@ def finetune(model: nn.Module) -> None:
             f"val_mIoU: {avg_val_iou:.4f}"
         )
 
-    ckpt_path = Path("/tmp/unet_finetuned.pt")
+    ckpt_path = Path("./tmp/unet_finetuned.pt")
     torch.save(model.state_dict(), ckpt_path)
     print(f"Чекпоинт сохранён: {ckpt_path}")

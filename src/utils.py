@@ -55,6 +55,10 @@ class BenchmarkResult:
     model_params_M: Optional[float] = None
     model_size_MB: Optional[float] = None
 
+    # Model quality
+    miou: Optional[float] = None
+    dice: Optional[float] = None
+
     def to_dict(self) -> dict:
         return asdict(self)
 

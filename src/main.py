@@ -20,26 +20,15 @@ def main():
 
     print("── Loading dataset ──────────────────────────")
 
-    train_ds = get_voc_dataset(root="data", image_set="train")
-    val_ds = get_voc_dataset(root="data", image_set="val")
+    test_ds = get_voc_dataset(root="data", image_set="val")
 
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True,
-    )
-
-    val_loader = DataLoader(
-        val_ds,
+    test_loader = DataLoader(
+        test_ds,
         batch_size=BATCH_SIZE,
         shuffle=False,
         num_workers=4,
         pin_memory=True,
     )
-
-    print(f"Train: {len(train_ds)} | Val: {len(val_ds)}")
 
     model = UNetResNet18()
 
@@ -54,7 +43,7 @@ def main():
 
     results = run_benchmark(
         model=model,
-        dataloader=val_loader,
+        dataloader=test_loader,
         device=DEVICE,
         pipeline_name="unet_voc_multiclass_fp16",
         num_classes=21,
