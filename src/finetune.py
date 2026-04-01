@@ -7,7 +7,7 @@ from tqdm import tqdm
 from loguru import logger
 
 from src.data import get_voc_dataset
-from src.config import BATCH_SIZE, DEVICE, FINETUNE_EPOCHS, LR
+from src.config import BATCH_SIZE, DEVICE, FINETUNE_EPOCHS, LR, TMP_DIR, CKPT_PATH
 
 
 criterion = nn.CrossEntropyLoss(ignore_index=255)
@@ -76,7 +76,6 @@ def finetune(model: nn.Module) -> None:
 
         model.eval()
         val_loss = 0.0
-        val_iou = 0.0
 
         with torch.no_grad():
             for imgs, masks in tqdm(val_loader, desc=f"Epoch {epoch} [val]"):
@@ -98,6 +97,6 @@ def finetune(model: nn.Module) -> None:
             f"val_loss: {avg_val_loss:.4f} | "
         )
 
-    ckpt_path = Path("../tmp/unet_finetuned.pt")
-    torch.save(model.state_dict(), ckpt_path)
-    print(f"Чекпоинт сохранён: {ckpt_path}")
+    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), CKPT_PATH)
+    print(f"Чекпоинт сохранён: {CKPT_PATH}")
