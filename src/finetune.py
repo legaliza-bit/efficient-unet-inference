@@ -7,7 +7,6 @@ from tqdm import tqdm
 from loguru import logger
 
 from src.data import get_voc_dataset
-from src.utils import miou
 from src.config import BATCH_SIZE, DEVICE, FINETUNE_EPOCHS, LR
 
 
@@ -91,18 +90,14 @@ def finetune(model: nn.Module) -> None:
                     loss = criterion(preds, masks)
                     val_loss += loss.item()
 
-                val_iou += miou(preds, masks)
-
         avg_val_loss = val_loss / len(val_loader)
-        avg_val_iou = val_iou / len(val_loader)
 
         logger.info(
             f"Epoch {epoch}/{FINETUNE_EPOCHS} — "
             f"train_loss: {avg_train_loss:.4f} | "
             f"val_loss: {avg_val_loss:.4f} | "
-            f"val_mIoU: {avg_val_iou:.4f}"
         )
 
-    ckpt_path = Path("./tmp/unet_finetuned.pt")
+    ckpt_path = Path("../tmp/unet_finetuned.pt")
     torch.save(model.state_dict(), ckpt_path)
     print(f"Чекпоинт сохранён: {ckpt_path}")
