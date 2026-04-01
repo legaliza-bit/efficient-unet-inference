@@ -58,6 +58,9 @@ class BenchmarkResult:
             f"Latency:     {self.latency_mean_ms:.2f} ± {self.latency_std_ms:.2f} ms "
             f"(p50={self.latency_p50_ms:.2f}, p95={self.latency_p95_ms:.2f})",
             f"Throughput:  {self.throughput_samples_per_sec:.1f} samples/s",
+            f"Mean IoU: {self.miou}",
+            f"Dice Score: {self.dice}",
+
         ]
         return "\n".join(lines)
 
