@@ -35,7 +35,7 @@ class DecoderBlock(nn.Module):
         return self.conv(x)
 
 
-class ResNet18UNet(nn.Module):
+class UNetResNet18(nn.Module):
     def __init__(self, num_classes=21):
         super().__init__()
 
