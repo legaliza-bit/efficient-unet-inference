@@ -6,6 +6,3 @@ venv/
 
 .vscode/
 .idea/
-
-tmp/
-data/
