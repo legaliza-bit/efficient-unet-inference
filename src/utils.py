@@ -121,7 +121,8 @@ def warmup_model(
     """Прогрев модели для стабилизации GPU-состояния."""
     with torch.no_grad():
         for _ in range(n_iters):
-            _ = model(dummy_input)
+            with torch.amp.autocast("cuda"):
+                _ = model(dummy_input)
     if device and device.type == "cuda":
         torch.cuda.synchronize(device)
 
