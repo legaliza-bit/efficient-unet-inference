@@ -118,21 +118,22 @@ def finetune_qat(model, num_classes=NUM_CLASSES, save_path=QAT_CKPT_PATH):
         model.parameters(), lr=LR / 10, weight_decay=1e-4
     )
 
-    cpu = torch.device("cpu")
+    scaler = torch.amp.GradScaler() if DEVICE.type == "cuda" else None
+    model.to(DEVICE)
 
     for epoch in range(QAT_EPOCHS):
         train_loss = _train_epoch(
-            model, train_loader, criterion, optimizer, None, None, cpu
+            model, train_loader, criterion, optimizer, None, scaler, DEVICE
         )
         val_loss, val_iou = _val_epoch(
-            model, val_loader, criterion, cpu, num_classes
+            model, val_loader, criterion, DEVICE, num_classes
         )
         print(
             f"QAT Epoch {epoch:2d}: train_loss={train_loss:.4f} "
             f"| val_loss={val_loss:.4f} | mIoU={val_iou:.4f}"
         )
 
-    model = convert_fx(model.eval())
+    model = convert_fx(model.cpu().eval())
 
     if save_path:
         save_path.parent.mkdir(parents=True, exist_ok=True)

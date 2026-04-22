@@ -1,14 +1,16 @@
 import argparse
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from src.config import DEVICE, BATCH_SIZE, DATA_DIR
 from src.utils import load_model, print_results, download_carvana
 from src.data import get_carvana
 from src.finetune.finetune import finetune, finetune_qat
-from src.model import build_model, apply_ptq
+from src.model import build_model, apply_trt_int8
 from src.run_benchmark import run_benchmark
+
+_CALIB_SAMPLES = 200  # images used for TRT INT8 calibration
 
 
 def main():
@@ -29,13 +31,11 @@ def main():
 
     carvana_dir = DATA_DIR / "carvana"
     imgs_dir = carvana_dir / "imgs"
-    downloaded = False
 
     if imgs_dir.exists():
         print(f"Found existing dataset at {carvana_dir}")
     elif args.download:
         download_carvana(carvana_dir)
-        downloaded = True
     else:
         raise FileNotFoundError(
             f"No dataset at {carvana_dir}. Run with --download to fetch it from Kaggle."
@@ -54,30 +54,33 @@ def main():
         finetune_qat(load_model())
 
     val_ds = get_carvana("val")
-    val_loader_gpu = DataLoader(
+    val_loader = DataLoader(
         val_ds, batch_size=BATCH_SIZE, shuffle=False,
         num_workers=4, pin_memory=(DEVICE.type == "cuda"),
     )
-    val_loader_cpu = DataLoader(
-        val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2,
+    calib_loader = DataLoader(
+        Subset(val_ds, range(min(_CALIB_SAMPLES, len(val_ds)))),
+        batch_size=BATCH_SIZE, shuffle=False,
+        num_workers=2, pin_memory=(DEVICE.type == "cuda"),
     )
 
-    print("\n── Experiment 1: FP16 baseline ──────────────────────────")
     model = load_model()
+
+    print("\n── Experiment 1: FP16 baseline (GPU) ───────────────────")
     results_fp16 = run_benchmark(
-        model, val_loader_gpu, DEVICE,
+        model, val_loader, DEVICE,
         pipeline_name="fp16_baseline",
         use_fp16=True,
     )
 
-    print("\n── Experiment 2: PTQ INT8 (CPU) ─────────────────────────")
-    ptq_model = apply_ptq(model)
-    results_ptq = run_benchmark(
-        ptq_model, val_loader_cpu, torch.device("cpu"),
-        pipeline_name="ptq_int8",
+    print("\n── Experiment 2: TensorRT INT8 (GPU) ───────────────────")
+    trt_model = apply_trt_int8(model, calib_loader, DEVICE)
+    results_trt = run_benchmark(
+        trt_model, val_loader, DEVICE,
+        pipeline_name="trt_int8",
     )
 
-    print_results([results_fp16, results_ptq])
+    print_results([results_fp16, results_trt])
 
 
 if __name__ == "__main__":

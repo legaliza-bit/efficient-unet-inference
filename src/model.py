@@ -29,8 +29,32 @@ def build_model(scale=IMG_SCALE):
     return model
 
 
-def apply_ptq(model):
-    model = copy.deepcopy(model).cpu().eval()
-    return torch.ao.quantization.quantize_dynamic(
-        model, {nn.Conv2d, nn.Linear}, dtype=torch.qint8
+def apply_trt_int8(model, calib_loader, device):
+    """Compile model to TensorRT INT8 engine using entropy calibration."""
+    import torch_tensorrt
+
+    model = copy.deepcopy(model).to(device).eval()
+
+    sample, _ = next(iter(calib_loader))
+    B, C, H, W = sample.shape
+
+    calibrator = torch_tensorrt.ptq.DataLoaderCalibrator(
+        calib_loader,
+        use_cache=False,
+        algo_type=torch_tensorrt.ptq.CalibrationAlgo.ENTROPY_CALIBRATION_2,
+        device=device,
     )
+
+    scripted = torch.jit.trace(model, sample.to(device))
+    trt_model = torch_tensorrt.compile(
+        scripted,
+        inputs=[torch_tensorrt.Input(
+            min_shape=(1, C, H, W),
+            opt_shape=(B, C, H, W),
+            max_shape=(B, C, H, W),
+        )],
+        enabled_precisions={torch.int8},
+        calibrator=calibrator,
+        truncate_long_and_double=True,
+    )
+    return trt_model
