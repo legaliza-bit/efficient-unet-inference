@@ -1,20 +1,17 @@
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.0-cudnn9-runtime-ubuntu22.04
 
-WORKDIR /src
+WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip curl && \
+RUN apt-get update && apt-get install -y curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --upgrade pip
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-RUN pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-RUN pip3 install uv
+RUN uv python install 3.13
 
 COPY pyproject.toml uv.lock ./
-RUN uv pip install --system --no-cache .
+RUN uv sync --frozen --no-cache
 
 COPY . .
 
-CMD ["python3", "main.py"]
+CMD ["uv", "run", "python", "-m", "src.main"]

@@ -1,10 +1,13 @@
 import argparse
+import os
 
 import torch
 from torch.utils.data import DataLoader, Subset
 
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 from src.config import DEVICE, BATCH_SIZE, DATA_DIR, ONNX_PATH, ORT_FP16_PATH, ORT_INT8_PATH
-from src.utils import load_model, print_results, download_carvana
+from src.utils import load_model, print_results, download_carvana, reset_gpu_state
 from src.data import get_carvana
 from src.finetune.finetune import finetune, finetune_qat
 from src.model import (
@@ -75,6 +78,9 @@ def main():
         r = run_benchmark(m, loader, device, name, precision,
                           profile=args.profile, **kw)
         results.append(r)
+        del m
+        torch._dynamo.reset()
+        reset_gpu_state()
 
     # ── 1. FP16 baseline (GPU) ────────────────────────────────────
     bench(model, val_loader, DEVICE, "fp16_baseline", "fp16")

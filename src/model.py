@@ -14,7 +14,7 @@ _CHECKPOINTS = {
 
 
 def build_model(scale=IMG_SCALE):
-    """Load milesial/Pytorch-UNet pretrained on Carvana, always to CPU."""
+    """Load milesial/Pytorch-UNet pretrained on Carvana, always to CPU first."""
     model = torch.hub.load(
         "milesial/Pytorch-UNet",
         "unet_carvana",
@@ -32,8 +32,8 @@ def build_model(scale=IMG_SCALE):
 
 
 def apply_compiled(model):
-    """torch.compile with max-autotune: kernel fusion + Triton codegen."""
-    return torch.compile(model, mode="max-autotune")
+    """torch.compile with max-autotune (no CUDA graphs to avoid private pool OOM)."""
+    return torch.compile(model, mode="max-autotune-no-cudagraphs")
 
 
 def apply_ptq(model):
@@ -117,6 +117,9 @@ class ORTModel:
             print("ORT: CUDAExecutionProvider unavailable, falling back to CPU")
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
+        # Fixed output channels from model metadata (dim 1 of output shape)
+        out_shape = self.session.get_outputs()[0].shape
+        self._out_channels = int(out_shape[1])
         self.device = device
         self.model_path = model_path
 
@@ -132,9 +135,19 @@ class ORTModel:
                 shape=tuple(x.shape),
                 buffer_ptr=x.data_ptr(),
             )
-            binding.bind_output(self.output_name, device_type="cuda", device_id=0)
+            out = torch.empty(
+                (x.shape[0], self._out_channels, x.shape[2], x.shape[3]),
+                dtype=torch.float32, device=self.device,
+            )
+            binding.bind_output(
+                name=self.output_name,
+                device_type="cuda", device_id=0,
+                element_type=np.float32,
+                shape=tuple(out.shape),
+                buffer_ptr=out.data_ptr(),
+            )
             self.session.run_with_iobinding(binding)
-            return torch.from_dlpack(binding.get_outputs()[0].to_dlpack())
+            return out
         out = self.session.run(
             [self.output_name], {self.input_name: x.numpy()}
         )[0]
