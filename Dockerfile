@@ -14,4 +14,4 @@ RUN uv sync --frozen --no-cache
 
 COPY . .
 
-CMD ["uv", "run", "python", "-m", "src.main"]
+CMD ["uv", "run", "python", "-m", "src.main", "--download"]
