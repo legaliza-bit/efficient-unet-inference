@@ -13,6 +13,7 @@ from src.model import build_model
 @dataclass
 class BenchmarkResult:
     pipeline_name: str
+    precision: str
     device: str
     batch_size: int
     num_batches: int
@@ -28,6 +29,7 @@ class BenchmarkResult:
 
     model_params_M: Optional[float] = None
     model_size_MB: Optional[float] = None
+    peak_gpu_memory_MB: Optional[float] = None
 
     miou: Optional[float] = None
     dice: Optional[float] = None
@@ -46,8 +48,10 @@ class BenchmarkResult:
             return cls(**json.load(f))
 
     def __str__(self) -> str:
+        mem = f"{self.peak_gpu_memory_MB:.0f} MB" if self.peak_gpu_memory_MB else "n/a"
         lines = [
             f"Pipeline:    {self.pipeline_name}",
+            f"Precision:   {self.precision}",
             f"Device:      {self.device}",
             f"Batch size:  {self.batch_size}",
             f"Samples:     {self.total_samples}",
@@ -55,6 +59,7 @@ class BenchmarkResult:
             f"{self.latency_std_ms:.2f} ms "
             f"(p50={self.latency_p50_ms:.2f}, p95={self.latency_p95_ms:.2f})",
             f"Throughput:  {self.throughput_samples_per_sec:.1f} samples/s",
+            f"Peak GPU mem:{mem}",
             f"mIoU:        {self.miou}",
             f"Dice:        {self.dice}",
         ]
@@ -99,18 +104,20 @@ def get_model_size_mb(model) -> float:
 
 def print_results(results):
     header = (
-        f"{'Experiment':<22} {'Device':<6} "
-        f"{'Lat(ms)':<10} {'Tput(img/s)':<13} "
-        f"{'mIoU':<8} {'Size(MB)'}"
+        f"{'Experiment':<22} {'Prec':<6} {'Dev':<5} "
+        f"{'Lat(ms)':<10} {'p95(ms)':<9} {'Tput(img/s)':<13} "
+        f"{'mIoU':<8} {'Dice':<8} {'GPU mem(MB)':<13} {'Size(MB)'}"
     )
     print("\n" + header)
-    print("-" * len(header))
+    print("─" * len(header))
     for r in results:
+        gpu_mem = f"{r.peak_gpu_memory_MB:.0f}" if r.peak_gpu_memory_MB else "n/a"
+        dev = r.device.split(":")[0]  # "cuda:0" → "cuda"
         print(
-            f"{r.pipeline_name:<22} {r.device:<6} "
-            f"{r.latency_mean_ms:<10.1f} "
+            f"{r.pipeline_name:<22} {r.precision:<6} {dev:<5} "
+            f"{r.latency_mean_ms:<10.1f} {r.latency_p95_ms:<9.1f} "
             f"{r.throughput_samples_per_sec:<13.1f} "
-            f"{r.miou:<8.4f} {r.model_size_MB:.1f}"
+            f"{r.miou:<8.4f} {r.dice:<8.4f} {gpu_mem:<13} {r.model_size_MB:.1f}"
         )
 
 

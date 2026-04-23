@@ -1,6 +1,8 @@
+import copy
 from pathlib import Path
 
 import torch
+import torch.nn as nn
 
 from src.config import IMG_SCALE
 
@@ -29,6 +31,19 @@ def build_model(scale=IMG_SCALE):
     return model
 
 
+def apply_compiled(model):
+    """torch.compile with max-autotune: kernel fusion + Triton codegen."""
+    return torch.compile(model, mode="max-autotune")
+
+
+def apply_ptq(model):
+    """PyTorch dynamic INT8 quantization (CPU only)."""
+    model = copy.deepcopy(model).cpu().eval()
+    return torch.ao.quantization.quantize_dynamic(
+        model, {nn.Conv2d, nn.Linear}, dtype=torch.qint8
+    )
+
+
 def export_to_onnx(model, sample_input: torch.Tensor, onnx_path: Path) -> None:
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
@@ -38,13 +53,25 @@ def export_to_onnx(model, sample_input: torch.Tensor, onnx_path: Path) -> None:
         input_names=["input"],
         output_names=["output"],
         dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
-        opset_version=17,
+        opset_version=13,
     )
     print(f"Exported ONNX model to {onnx_path}")
 
 
+def apply_ort_fp16(onnx_path: Path, fp16_path: Path) -> None:
+    """Convert ONNX model weights to FP16 (I/O stays FP32 via keep_io_types)."""
+    import onnx
+    from onnxconverter_common import float16
+
+    fp16_path.parent.mkdir(parents=True, exist_ok=True)
+    model = onnx.load(str(onnx_path))
+    model_fp16 = float16.convert_float_to_float16(model, keep_io_types=True)
+    onnx.save(model_fp16, str(fp16_path))
+    print(f"Saved FP16 ONNX model to {fp16_path}")
+
+
 def apply_ort_int8(onnx_path: Path, int8_path: Path, calib_loader) -> None:
-    """Quantize an ONNX model to INT8 via static calibration."""
+    """Static INT8 quantization of an ONNX model via calibration data."""
     from onnxruntime.quantization import (
         CalibrationDataReader, QuantFormat, QuantType, quantize_static,
     )
@@ -85,16 +112,33 @@ class ORTModel:
             else ["CPUExecutionProvider"]
         )
         self.session = ort.InferenceSession(str(model_path), providers=providers)
+        active = self.session.get_providers()
+        if device.type == "cuda" and "CUDAExecutionProvider" not in active:
+            print("ORT: CUDAExecutionProvider unavailable, falling back to CPU")
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
         self.device = device
         self.model_path = model_path
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        if self.device.type == "cuda":
+            import numpy as np
+            binding = self.session.io_binding()
+            x = x.contiguous()
+            binding.bind_input(
+                name=self.input_name,
+                device_type="cuda", device_id=0,
+                element_type=np.float32,
+                shape=tuple(x.shape),
+                buffer_ptr=x.data_ptr(),
+            )
+            binding.bind_output(self.output_name, device_type="cuda", device_id=0)
+            self.session.run_with_iobinding(binding)
+            return torch.from_dlpack(binding.get_outputs()[0].to_dlpack())
         out = self.session.run(
-            [self.output_name], {self.input_name: x.cpu().numpy()}
+            [self.output_name], {self.input_name: x.numpy()}
         )[0]
-        return torch.from_numpy(out).to(self.device)
+        return torch.from_numpy(out)
 
     def eval(self): return self
     def to(self, device): self.device = device; return self

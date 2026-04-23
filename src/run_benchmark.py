@@ -1,5 +1,6 @@
 import time
 import torch
+from torch.profiler import ProfilerActivity
 from loguru import logger
 import numpy as np
 
@@ -7,7 +8,36 @@ from src.utils import (
     BenchmarkResult, reset_gpu_state, warmup_model, get_model_size_mb,
 )
 from src.metrics import update_conf_matrix, compute_miou_dice
-from src.config import NUM_CLASSES
+from src.config import NUM_CLASSES, PROFILE_DIR
+
+
+def _forward(model, x: torch.Tensor, precision: str) -> torch.Tensor:
+    use_amp = precision in ("fp16", "bf16") and x.device.type == "cuda"
+    amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
+    with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+        return model(x)
+
+
+def _profile(model, dataloader, device, pipeline_name: str, precision: str) -> None:
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    sched = torch.profiler.schedule(wait=1, warmup=1, active=3)
+    with torch.profiler.profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        schedule=sched,
+        record_shapes=True,
+        with_flops=True,
+    ) as prof:
+        for i, (x, _) in enumerate(dataloader):
+            if i >= 5:
+                break
+            with torch.no_grad():
+                _forward(model, x.to(device), precision)
+            prof.step()
+
+    trace_path = PROFILE_DIR / f"{pipeline_name}.json"
+    prof.export_chrome_trace(str(trace_path))
+    print(f"  Profile trace → {trace_path}")
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
 
 def run_benchmark(
@@ -15,24 +45,28 @@ def run_benchmark(
     dataloader,
     device,
     pipeline_name: str,
+    precision: str = "fp16",
     num_classes: int = NUM_CLASSES,
-    use_fp16: bool = False,
-):
+    profile: bool = False,
+) -> BenchmarkResult:
     model = model.to(device)
     model.eval()
 
     reset_gpu_state()
 
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+
     dummy_input = next(iter(dataloader))[0].to(device)
-    warmup_model(
-        model, dummy_input, n_iters=20, device=device, use_fp16=use_fp16
-    )
+    warmup_model(model, dummy_input, n_iters=20, device=device,
+                 use_fp16=(precision == "fp16"))
+
+    if profile:
+        _profile(model, dataloader, device, pipeline_name, precision)
 
     latencies = []
     total_samples = 0
-    conf_matrix = torch.zeros(
-        (num_classes, num_classes), dtype=torch.int64, device=device
-    )
+    conf_matrix = torch.zeros((num_classes, num_classes), dtype=torch.int64, device=device)
 
     if device.type == "cuda":
         start_event = torch.cuda.Event(enable_timing=True)
@@ -40,24 +74,19 @@ def run_benchmark(
 
     with torch.no_grad():
         for x, y in dataloader:
-            x = x.to(device)
-            y = y.to(device)
+            x, y = x.to(device), y.to(device)
             batch_size = x.size(0)
 
             if device.type == "cuda":
                 torch.cuda.synchronize()
                 start_event.record()
-                if use_fp16:
-                    with torch.amp.autocast("cuda"):
-                        out = model(x)
-                else:
-                    out = model(x)
+                out = _forward(model, x, precision)
                 end_event.record()
                 torch.cuda.synchronize()
                 lat = start_event.elapsed_time(end_event)
             else:
                 t0 = time.perf_counter()
-                out = model(x)
+                out = _forward(model, x, precision)
                 lat = (time.perf_counter() - t0) * 1000
 
             pred = torch.argmax(out, dim=1)
@@ -68,9 +97,14 @@ def run_benchmark(
     arr = np.array(latencies)
     total_time_sec = arr.sum() / 1000.0
     miou, mean_dice = compute_miou_dice(conf_matrix)
+    peak_mem = (
+        torch.cuda.max_memory_allocated(device) / 1024**2
+        if device.type == "cuda" else None
+    )
 
     result = BenchmarkResult(
         pipeline_name=pipeline_name,
+        precision=precision,
         device=str(device),
         batch_size=dataloader.batch_size,
         num_batches=len(dataloader),
@@ -83,6 +117,7 @@ def run_benchmark(
         throughput_samples_per_sec=total_samples / total_time_sec,
         model_params_M=sum(p.numel() for p in model.parameters()) / 1e6,
         model_size_MB=get_model_size_mb(model),
+        peak_gpu_memory_MB=peak_mem,
         miou=miou,
         dice=mean_dice,
     )
