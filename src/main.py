@@ -3,14 +3,14 @@ import argparse
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from src.config import DEVICE, BATCH_SIZE, DATA_DIR
+from src.config import DEVICE, BATCH_SIZE, DATA_DIR, ONNX_PATH, ORT_INT8_PATH
 from src.utils import load_model, print_results, download_carvana
 from src.data import get_carvana
 from src.finetune.finetune import finetune, finetune_qat
-from src.model import build_model, apply_trt_int8
+from src.model import build_model, export_to_onnx, apply_ort_int8, ORTModel
 from src.run_benchmark import run_benchmark
 
-_CALIB_SAMPLES = 200  # images used for TRT INT8 calibration
+_CALIB_SAMPLES = 200
 
 
 def main():
@@ -60,8 +60,7 @@ def main():
     )
     calib_loader = DataLoader(
         Subset(val_ds, range(min(_CALIB_SAMPLES, len(val_ds)))),
-        batch_size=BATCH_SIZE, shuffle=False,
-        num_workers=2, pin_memory=(DEVICE.type == "cuda"),
+        batch_size=BATCH_SIZE, shuffle=False, num_workers=2,
     )
 
     model = load_model()
@@ -73,14 +72,17 @@ def main():
         use_fp16=True,
     )
 
-    print("\n── Experiment 2: TensorRT INT8 (GPU) ───────────────────")
-    trt_model = apply_trt_int8(model, calib_loader, DEVICE)
-    results_trt = run_benchmark(
-        trt_model, val_loader, DEVICE,
-        pipeline_name="trt_int8",
+    print("\n── Experiment 2: ORT INT8 (GPU) ─────────────────────────")
+    sample, _ = next(iter(calib_loader))
+    export_to_onnx(model, sample, ONNX_PATH)
+    apply_ort_int8(ONNX_PATH, ORT_INT8_PATH, calib_loader)
+    ort_model = ORTModel(ORT_INT8_PATH, DEVICE)
+    results_ort = run_benchmark(
+        ort_model, val_loader, DEVICE,
+        pipeline_name="ort_int8",
     )
 
-    print_results([results_fp16, results_trt])
+    print_results([results_fp16, results_ort])
 
 
 if __name__ == "__main__":

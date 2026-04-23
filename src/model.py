@@ -1,6 +1,6 @@
-import copy
+from pathlib import Path
+
 import torch
-import torch.nn as nn
 
 from src.config import IMG_SCALE
 
@@ -29,32 +29,74 @@ def build_model(scale=IMG_SCALE):
     return model
 
 
-def apply_trt_int8(model, calib_loader, device):
-    """Compile model to TensorRT INT8 engine using entropy calibration."""
-    import torch_tensorrt
+def export_to_onnx(model, sample_input: torch.Tensor, onnx_path: Path) -> None:
+    onnx_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.onnx.export(
+        model.cpu().eval(),
+        sample_input.cpu(),
+        str(onnx_path),
+        input_names=["input"],
+        output_names=["output"],
+        dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
+        opset_version=17,
+    )
+    print(f"Exported ONNX model to {onnx_path}")
 
-    model = copy.deepcopy(model).to(device).eval()
 
-    sample, _ = next(iter(calib_loader))
-    B, C, H, W = sample.shape
-
-    calibrator = torch_tensorrt.ptq.DataLoaderCalibrator(
-        calib_loader,
-        use_cache=False,
-        algo_type=torch_tensorrt.ptq.CalibrationAlgo.ENTROPY_CALIBRATION_2,
-        device=device,
+def apply_ort_int8(onnx_path: Path, int8_path: Path, calib_loader) -> None:
+    """Quantize an ONNX model to INT8 via static calibration."""
+    from onnxruntime.quantization import (
+        CalibrationDataReader, QuantFormat, QuantType, quantize_static,
     )
 
-    scripted = torch.jit.trace(model, sample.to(device))
-    trt_model = torch_tensorrt.compile(
-        scripted,
-        inputs=[torch_tensorrt.Input(
-            min_shape=(1, C, H, W),
-            opt_shape=(B, C, H, W),
-            max_shape=(B, C, H, W),
-        )],
-        enabled_precisions={torch.int8},
-        calibrator=calibrator,
-        truncate_long_and_double=True,
+    class _CalibReader(CalibrationDataReader):
+        def __init__(self, loader):
+            self._iter = iter(loader)
+
+        def get_next(self):
+            try:
+                imgs, _ = next(self._iter)
+                return {"input": imgs.numpy()}
+            except StopIteration:
+                return None
+
+    int8_path.parent.mkdir(parents=True, exist_ok=True)
+    quantize_static(
+        str(onnx_path),
+        str(int8_path),
+        _CalibReader(calib_loader),
+        quant_format=QuantFormat.QDQ,
+        per_channel=False,
+        weight_type=QuantType.QInt8,
+        activation_type=QuantType.QInt8,
     )
-    return trt_model
+    print(f"Saved INT8 ONNX model to {int8_path}")
+
+
+class ORTModel:
+    """ORT InferenceSession wrapped to match the PyTorch model interface."""
+
+    def __init__(self, model_path: Path, device: torch.device):
+        import onnxruntime as ort
+
+        providers = (
+            ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            if device.type == "cuda"
+            else ["CPUExecutionProvider"]
+        )
+        self.session = ort.InferenceSession(str(model_path), providers=providers)
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_name = self.session.get_outputs()[0].name
+        self.device = device
+        self.model_path = model_path
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.session.run(
+            [self.output_name], {self.input_name: x.cpu().numpy()}
+        )[0]
+        return torch.from_numpy(out).to(self.device)
+
+    def eval(self): return self
+    def to(self, device): self.device = device; return self
+    def parameters(self): return iter([])
+    def buffers(self): return iter([])

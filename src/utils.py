@@ -89,7 +89,9 @@ def warmup_model(
         torch.cuda.synchronize(device)
 
 
-def get_model_size_mb(model: torch.nn.Module) -> float:
+def get_model_size_mb(model) -> float:
+    if hasattr(model, "model_path"):
+        return Path(model.model_path).stat().st_size / 1024**2
     total = sum(p.numel() * p.element_size() for p in model.parameters())
     total += sum(b.numel() * b.element_size() for b in model.buffers())
     return total / 1024**2
