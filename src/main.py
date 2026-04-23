@@ -2,22 +2,16 @@ import argparse
 import os
 
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-from src.config import DEVICE, BATCH_SIZE, DATA_DIR, ONNX_PATH, ORT_FP16_PATH, ORT_INT8_PATH
-from src.utils import load_model, print_results, download_carvana, reset_gpu_state
+from src.config import DEVICE, BATCH_SIZE, DATA_DIR
+from src.utils import load_model, print_results, download_carvana, reset_gpu_state, log_gpu
 from src.data import get_carvana
 from src.finetune.finetune import finetune, finetune_qat
-from src.model import (
-    apply_compiled, apply_ptq,
-    export_to_onnx, apply_ort_fp16, apply_ort_int8, ORTModel,
-)
+from src.model import apply_compiled, apply_int8, apply_fp8
 from src.run_benchmark import run_benchmark
-
-_CALIB_SAMPLES = 200
-_CPU = torch.device("cpu")
 
 
 def main():
@@ -41,8 +35,9 @@ def main():
         )
 
     print(f"Device: {DEVICE}")
-    if DEVICE.type == "cuda":
-        print(f"GPU:    {torch.cuda.get_device_name(0)}")
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
 
     model = load_model()
 
@@ -60,48 +55,33 @@ def main():
         val_ds, batch_size=BATCH_SIZE, shuffle=False,
         num_workers=4, pin_memory=(DEVICE.type == "cuda"),
     )
-    val_loader_cpu = DataLoader(
-        val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2,
-    )
-    calib_loader = DataLoader(
-        Subset(val_ds, range(min(_CALIB_SAMPLES, len(val_ds)))),
-        batch_size=BATCH_SIZE, shuffle=False, num_workers=2,
-    )
-
-    sample, _ = next(iter(calib_loader))
-    export_to_onnx(model, sample, ONNX_PATH)
-
     results = []
 
     def bench(m, loader, device, name, precision, **kw):
         print(f"\n── {name} {'─' * max(0, 52 - len(name))}")
+        log_gpu(f"start {name}")
+
         r = run_benchmark(m, loader, device, name, precision,
                           profile=args.profile, **kw)
+        log_gpu(f"end {name}")
+
         results.append(r)
         del m
-        torch._dynamo.reset()
         reset_gpu_state()
 
     # ── 1. FP16 baseline (GPU) ────────────────────────────────────
     bench(model, val_loader, DEVICE, "fp16_baseline", "fp16")
 
-    # ── 2. BF16 baseline (GPU) ───────────────────────────────────
-    bench(model, val_loader, DEVICE, "bf16_baseline", "bf16")
-
-    # ── 3. torch.compile FP16 (GPU) ──────────────────────────────
+    # ── 2. torch.compile FP16 (GPU) ──────────────────────────────
     print("\nCompiling model (first run will be slow)…")
     bench(apply_compiled(model), val_loader, DEVICE, "compile_fp16", "fp16")
 
-    # ── 4. ORT FP16 (GPU) ────────────────────────────────────────
-    apply_ort_fp16(ONNX_PATH, ORT_FP16_PATH)
-    bench(ORTModel(ORT_FP16_PATH, DEVICE), val_loader, DEVICE, "ort_fp16", "fp16")
+    # ── 3. FP8 torchao (GPU, SM 8.9+) ───────────────────────────
+    print("\nApplying FP8 weight quantization (torchao)…")
+    bench(apply_fp8(model), val_loader, DEVICE, "fp8_torchao", "fp8")
 
-    # ── 5. ORT INT8 (GPU) ────────────────────────────────────────
-    apply_ort_int8(ONNX_PATH, ORT_INT8_PATH, calib_loader)
-    bench(ORTModel(ORT_INT8_PATH, DEVICE), val_loader, DEVICE, "ort_int8", "int8")
-
-    # ── 6. PyTorch dynamic INT8 (CPU) ────────────────────────────
-    bench(apply_ptq(model), val_loader_cpu, _CPU, "ptq_int8_cpu", "int8")
+    # ── 4. torchao INT8 (GPU) ────────────────────────────────────
+    bench(apply_int8(model), val_loader, DEVICE, "int8_torchao", "int8")
 
     print_results(results)
 

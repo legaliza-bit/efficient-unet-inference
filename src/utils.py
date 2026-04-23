@@ -10,6 +10,20 @@ from src.config import CKPT_PATH
 from src.model import build_model
 
 
+def log_gpu(tag: str):
+    if torch.cuda.is_available():
+        alloc = torch.cuda.memory_allocated() / 1024**2
+        reserv = torch.cuda.memory_reserved() / 1024**2
+        free, total = torch.cuda.mem_get_info()
+        free = free / 1024**2
+        total = total / 1024**2
+
+        print(
+            f"[GPU {tag}] "
+            f"allocated={alloc:.1f}MB | reserved={reserv:.1f}MB | "
+            f"free={free:.1f}MB | total={total:.1f}MB"
+        )
+
 @dataclass
 class BenchmarkResult:
     pipeline_name: str
@@ -81,12 +95,13 @@ def warmup_model(
     dummy_input: torch.Tensor,
     n_iters: int = 10,
     device: Optional[torch.device] = None,
-    use_fp16: bool = False,
+    precision: str = "fp32",
 ) -> None:
+    use_amp = precision == "fp16" and device is not None and device.type == "cuda"
     with torch.no_grad():
         for _ in range(n_iters):
-            if use_fp16 and device and device.type == "cuda":
-                with torch.amp.autocast("cuda"):
+            if use_amp:
+                with torch.amp.autocast("cuda", dtype=torch.float16):
                     _ = model(dummy_input)
             else:
                 _ = model(dummy_input)

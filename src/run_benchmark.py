@@ -12,10 +12,10 @@ from src.config import NUM_CLASSES, PROFILE_DIR
 
 
 def _forward(model, x: torch.Tensor, precision: str) -> torch.Tensor:
-    use_amp = precision in ("fp16", "bf16") and x.device.type == "cuda"
-    amp_dtype = torch.bfloat16 if precision == "bf16" else torch.float16
-    with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
-        return model(x)
+    if precision == "fp16" and x.device.type == "cuda":
+        with torch.amp.autocast("cuda", dtype=torch.float16):
+            return model(x)
+    return model(x)
 
 
 def _profile(model, dataloader, device, pipeline_name: str, precision: str) -> None:
@@ -58,8 +58,7 @@ def run_benchmark(
         torch.cuda.reset_peak_memory_stats(device)
 
     dummy_input = next(iter(dataloader))[0].to(device)
-    warmup_model(model, dummy_input, n_iters=20, device=device,
-                 use_fp16=(precision == "fp16"))
+    warmup_model(model, dummy_input, n_iters=20, device=device, precision=precision)
 
     if profile:
         _profile(model, dataloader, device, pipeline_name, precision)
@@ -96,6 +95,8 @@ def run_benchmark(
 
     arr = np.array(latencies)
     total_time_sec = arr.sum() / 1000.0
+    p99 = float(np.percentile(arr, 99))
+    arr_trimmed = arr[arr <= p99]
     miou, mean_dice = compute_miou_dice(conf_matrix)
     peak_mem = (
         torch.cuda.max_memory_allocated(device) / 1024**2
@@ -109,8 +110,8 @@ def run_benchmark(
         batch_size=dataloader.batch_size,
         num_batches=len(dataloader),
         total_samples=total_samples,
-        latency_mean_ms=float(arr.mean()),
-        latency_std_ms=float(arr.std()),
+        latency_mean_ms=float(arr_trimmed.mean()),
+        latency_std_ms=float(arr_trimmed.std()),
         latency_p50_ms=float(np.percentile(arr, 50)),
         latency_p95_ms=float(np.percentile(arr, 95)),
         latency_p99_ms=float(np.percentile(arr, 99)),
