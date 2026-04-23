@@ -13,20 +13,12 @@
 ## Quickstart
 
 ```bash
-docker build -t unet-bench .
-docker run --gpus all -it unet-bench
-```
-
-или без докера
-
-```bash
 uv sync
-uv run python -m src.main
+uv run python -m src.main --download
 ```
 
 ## Архитектура модели
 
-Residual Encoder–Decoder U-Net c ResNet18 backbone для задачи мультиклассовой сегментации
 
 ---
 
