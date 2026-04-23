@@ -12,6 +12,10 @@
 
 ## Quickstart
 
+Для скачивания данных через скрипт нужно положить свой Kaggle API key в `~/.kaggle/kaggle.json`. Либо можно скачать данные вручную отсюда: https://www.kaggle.com/c/carvana-image-masking-challenge.
+
+Убедитесь, что вы присоединились к соревнованию на сайте.
+
 ```bash
 uv sync
 uv run python -m src.main --download
