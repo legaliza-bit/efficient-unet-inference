@@ -97,7 +97,7 @@ def warmup_model(
     device: Optional[torch.device] = None,
     precision: str = "fp32",
 ) -> None:
-    use_amp = precision == "fp16" and device is not None and device.type == "cuda"
+    use_amp = precision != "fp32" and device is not None and device.type == "cuda"
     with torch.no_grad():
         for _ in range(n_iters):
             if use_amp:
@@ -213,3 +213,4 @@ def reset_gpu_state() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
+    torch._dynamo.reset()

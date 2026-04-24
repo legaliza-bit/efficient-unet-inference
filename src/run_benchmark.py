@@ -12,7 +12,7 @@ from src.config import NUM_CLASSES, PROFILE_DIR
 
 
 def _forward(model, x: torch.Tensor, precision: str) -> torch.Tensor:
-    if precision == "fp16" and x.device.type == "cuda":
+    if precision != "fp32" and x.device.type == "cuda":
         with torch.amp.autocast("cuda", dtype=torch.float16):
             return model(x)
     return model(x)

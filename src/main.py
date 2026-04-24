@@ -70,6 +70,7 @@ def main():
         results.append(r)
         del m
         reset_gpu_state()
+        model.cpu()
 
     # ── 1. FP16 baseline (GPU) ────────────────────────────────────
     bench(model, val_loader, DEVICE, "fp16_baseline", "fp16")
