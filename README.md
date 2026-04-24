@@ -68,7 +68,7 @@ kaggle competitions list
 ## Quickstart
 
 ```bash
-uv sync
+uv sync (или  uv sync --extra trt для установки TensorRT)
 uv run python -m src.main --download
 ```
 
