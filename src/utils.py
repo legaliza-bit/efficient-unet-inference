@@ -136,6 +136,16 @@ def print_results(results):
         )
 
 
+def _validate_zip(zip_path: Path) -> bool:
+    """Return True if *zip_path* is a valid, non-corrupted zip archive."""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            bad = zf.testzip()
+            return bad is None  # None means every entry is OK
+    except (zipfile.BadZipFile, OSError):
+        return False
+
+
 def download_carvana(dest_dir: Path) -> None:
     """Download Carvana images and masks from Kaggle into dest_dir.
 
@@ -152,13 +162,39 @@ def download_carvana(dest_dir: Path) -> None:
         ("train.zip",       "train",       "imgs"),
         ("train_masks.zip", "train_masks", "masks"),
     ]:
-        print(f"Downloading {filename} …")
-        subprocess.run(
-            ["kaggle", "competitions", "download", "-c", comp, "-f", filename, "-p", str(dest_dir)],
-            check=True,
-        )
-
         zip_path = dest_dir / filename
+
+        # If a corrupted zip exists from a previous failed download, delete it
+        # so the kaggle CLI doesn't skip re-downloading it.
+        if zip_path.exists():
+            if _validate_zip(zip_path):
+                print(f"{filename} already exists and is valid, skipping download.")
+            else:
+                print(f"{filename} exists but is corrupted, deleting and re-downloading …")
+                zip_path.unlink()
+
+        if not zip_path.exists():
+            print(f"Downloading {filename} …")
+            subprocess.run(
+                ["kaggle", "competitions", "download", "-c", comp, "-f", filename, "-p", str(dest_dir)],
+                check=True,
+            )
+
+        # Validate the downloaded zip before extraction; retry with --force if
+        # it is corrupted (e.g. interrupted download, stale cache).
+        if not _validate_zip(zip_path):
+            print(f"{filename} is corrupted after download, retrying with --force …")
+            zip_path.unlink()
+            subprocess.run(
+                ["kaggle", "competitions", "download", "-c", comp, "-f", filename, "-p", str(dest_dir), "--force"],
+                check=True,
+            )
+            if not _validate_zip(zip_path):
+                raise zipfile.BadZipFile(
+                    f"{filename} is still corrupted after forced re-download. "
+                    "Check your network connection and Kaggle credentials."
+                )
+
         print(f"Extracting {filename} …")
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(dest_dir)

@@ -10,11 +10,62 @@
 
 ---
 
+## Kaggle API Setup
+
+Для скачивания данных используется Kaggle API. Перед запуском `--download` необходимо настроить аутентификацию.
+
+### Предварительное требование
+
+1. Зарегистрируйтесь на [Kaggle](https://www.kaggle.com/).
+2. Присоединитесь к соревнованию и **примите правила** на странице https://www.kaggle.com/competitions/carvana-image-masking-challenge/rules — без этого скачивание будет запрещено.
+
+### Вариант A: API-токен (рекомендуется для kaggle CLI v2+)
+
+1. Перейдите на https://www.kaggle.com/settings → API → **Create New Token**. Файл `kaggle.json` будет загружен на компьютер.
+
+2. Откройте скачанный `kaggle.json` и проверьте значение поля `key`:
+
+   - **Если `key` начинается с `KGAT_`** — это OAuth access token. Его нужно поместить в `~/.kaggle/access_token`:
+     ```bash
+     mkdir -p ~/.kaggle
+     echo -n 'KGAT_your_token_here' > ~/.kaggle/access_token
+     chmod 600 ~/.kaggle/access_token
+     ```
+
+   - **Если `key` — обычная hex-строка** (без префикса `KGAT_`) — это legacy API key. Используйте стандартный метод:
+     ```bash
+     mkdir -p ~/.kaggle
+     mv ~/Downloads/kaggle.json ~/.kaggle/
+     chmod 600 ~/.kaggle/kaggle.json
+     ```
+
+### Вариант B: Переменная окружения
+
+```bash
+export KAGGLE_API_TOKEN='KGAT_your_token_here'
+```
+
+###  Важно
+
+Не помещайте токен с префиксом `KGAT_` в поле `key` файла `kaggle.json` — это приведёт к ошибке **401 Unauthorized**. Legacy-метод аутентификации отправляет ключ как HTTP Basic Auth, а `KGAT_`-токены требуют OAuth.
+
+### Проверка настройки
+
+```bash
+kaggle competitions list
+```
+
+Если команда выводит список соревнований без ошибок — аутентификация настроена правильно.
+
+### Повторная загрузка
+
+Если скачивание прервалось и остался повреждённый zip-файл, скрипт автоматически обнаружит это и повторит загрузку с флагом `--force`.
+
+Альтернативно, данные можно скачать вручную: https://www.kaggle.com/c/carvana-image-masking-challenge.
+
+---
+
 ## Quickstart
-
-Для скачивания данных через скрипт нужно положить свой Kaggle API key в `~/.kaggle/kaggle.json`. Либо можно скачать данные вручную отсюда: https://www.kaggle.com/c/carvana-image-masking-challenge.
-
-Убедитесь, что вы присоединились к соревнованию на сайте.
 
 ```bash
 uv sync
