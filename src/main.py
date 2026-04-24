@@ -88,6 +88,12 @@ def main():
 
     # ── 5 & 6. TRT experiments (GPU) ─────────────────────────────
     if args.trt:
+        try:
+            import tensorrt as _trt  # noqa: F401 — availability check
+        except ImportError:
+            raise ImportError(
+                "TensorRT is required for --trt. Install with: uv sync --extra trt"
+            )
         from src.config import (
             ONNX_PATH, TRT_FP16_PATH, TRT_INT8_PATH, CALIB_PATH,
         )

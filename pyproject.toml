@@ -15,6 +15,9 @@ dependencies = [
     "torchvision==0.26.0",
 ]
 
+[project.optional-dependencies]
+trt = ["tensorrt-cu12>=10.0.0", "onnx", "onnxscript"]
+
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu128" }]
 torchvision = [{ index = "pytorch-cu128" }]

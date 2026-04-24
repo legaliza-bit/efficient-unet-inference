@@ -4,7 +4,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import tensorrt as trt
 
 
 def export_to_onnx(model, sample_input: torch.Tensor, onnx_path: Path) -> None:
@@ -74,6 +73,7 @@ class TRTModel:
     """TensorRT engine wrapper matching the PyTorch model call interface."""
 
     def __init__(self, engine_path: Path, device: torch.device):
+        import tensorrt as trt
 
         logger = trt.Logger(trt.Logger.WARNING)
         runtime = trt.Runtime(logger)
