@@ -20,6 +20,8 @@ def main():
     parser.add_argument("--finetune-qat", action="store_true")
     parser.add_argument("--download", action="store_true",
                         help="Download Carvana from Kaggle (requires ~/.kaggle/kaggle.json)")
+    parser.add_argument("--trt", action="store_true",
+                        help="Include TensorRT FP16 experiment (requires tensorrt-cu12)")
     parser.add_argument("--profile", action="store_true",
                         help="Run torch.profiler on each experiment and save chrome traces to tmp/profiles/")
     args = parser.parse_args()
@@ -82,6 +84,29 @@ def main():
 
     # ── 4. torchao INT8 (GPU) ────────────────────────────────────
     bench(apply_int8(model), val_loader, DEVICE, "int8_torchao", "int8")
+
+    # ── 5 & 6. TRT experiments (GPU) ─────────────────────────────
+    if args.trt:
+        from src.config import (
+            ONNX_PATH, TRT_FP16_PATH, TRT_INT8_PATH, CALIB_PATH,
+        )
+        from src.trt import (
+            export_to_onnx, save_calib_data, build_trt_engine, TRTModel,
+        )
+        sample, _ = next(iter(val_loader))
+        export_to_onnx(model, sample, ONNX_PATH)
+        save_calib_data(val_loader, n_samples=200, calib_path=CALIB_PATH)
+
+        print("\nBuilding TRT FP16 engine…")
+        build_trt_engine(ONNX_PATH, TRT_FP16_PATH, fp16=True)
+        bench(TRTModel(TRT_FP16_PATH, DEVICE), val_loader, DEVICE, "trt_fp16", "fp16")
+
+        print("\nBuilding TRT INT8 engine (calibrating)…")
+        build_trt_engine(
+            ONNX_PATH, TRT_INT8_PATH,
+            int8=True, calib_path=CALIB_PATH,
+        )
+        bench(TRTModel(TRT_INT8_PATH, DEVICE), val_loader, DEVICE, "trt_int8", "int8")
 
     print_results(results)
 
