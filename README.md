@@ -2,14 +2,15 @@
 
 ## Постановка задачи
 
-Цель проекта — измерить и сравнить end-to-end latency и throughput инференса UNet-модели на ImageNet при использовании различных техник оптимизации:
+Цель проекта — измерить и сравнить end-to-end latency и throughput инференса UNet-модели на датасете Carvana при использовании различных техник оптимизации:
 
 | # | Пайплайн | Описание |
 |---|----------|----------|
 | 1 | **PyTorch FP16 baseline** | Бейзлайновый запуск без оптимизаций |
 | 2 | **PyTorch torch.compile** | Графовая компиляция (max-autotune) |
-| 3 | **TVM (Relay/LLVM)** | Альтернативный компилятор с AutoTVM-тюнингом |
-| 4 | **torchao FP8/INT8** | Динамическая и статическая квантизация |
+| 3 | **torchao FP8/INT8** | Динамическая и статическая квантизация |
+| 4 | **TVM (Relay/LLVM)** | Альтернативный компилятор с AutoTVM-тюнингом |
+| 5 | **TensorRT** | NVIDIA TensorRT FP16/INT8 (опционально) |
 
 ## Итоги (Сравнительная таблица)
 
@@ -24,9 +25,56 @@
 
 ---
 
+## Быстрый старт
+
+### 1. Установка зависимостей
+
+```bash
+uv sync
+```
+
+Для TensorRT (опционально):
+```bash
+uv sync --extra trt
+```
+
+### 2. Скачивание датасета
+
+Для скачивания данных используется Kaggle API. Перед запуском `--download` необходимо настроить аутентификацию (см. раздел [Kaggle API Setup](#kaggle-api-setup) ниже).
+
+```bash
+uv run python -m src.main --download
+```
+
+Данные будут сохранены в `data/carvana/imgs/` и `data/carvana/masks/`.
+
+### 3. Запуск бенчмарка
+
+Полный прогон всех пайплайнов (кроме TVM и TRT):
+```bash
+uv run python -m src.main
+```
+
+С TVM:
+```bash
+uv run python -m src.main --tvm
+```
+
+С TensorRT:
+```bash
+uv run python -m src.main --trt
+```
+
+Профилирование (chrome traces → `tmp/profiles/`):
+```bash
+uv run python -m src.main --profile
+```
+
+---
+
 ## Kaggle API Setup
 
-Для скачивания данных используется Kaggle API. Перед запуском `--download` необходимо настроить аутентификацию.
+Перед запуском `--download` необходимо настроить аутентификацию.
 
 ### Предварительное требование
 
@@ -83,7 +131,15 @@ kaggle competitions list
 
 В проекте используется Apache TVM для генерации эффективных CUDA-ядер. Ввиду требования TVM к Python 3.11, он запускается как отдельный процесс из-под виртуального окружения `.venv-tvm311`.
 
-### 1. Настройка окружения TVM
+### 1. Скачивание датасета
+
+TVM требует тот же датасет Carvana. Если датасет ещё не скачан:
+
+```bash
+uv run python -m src.main --download
+```
+
+### 2. Настройка окружения TVM
 
 ```bash
 uv python install 3.11
@@ -93,7 +149,7 @@ uv pip install --python .venv-tvm311/bin/python -r requirements-tvm.txt
 
 Подробная инструкция по сборке самого TVM из исходников с поддержкой cuDNN/cuBLAS (для максимальной скорости) находится в `TVM_SETUP.md`.
 
-### 2. Запуск бенчмарка
+### 3. Запуск бенчмарка
 
 Прогон TVM пайплайна (FP16/FP32):
 ```bash
@@ -107,8 +163,32 @@ uv run python -m src.main --tvm
 uv run python -m src.main --tvm --tvm-tune
 ```
 
+Количество триалов AutoTVM (по умолчанию 1000):
+```bash
+uv run python -m src.main --tvm --tvm-tune --tvm-tune-trials 500
+```
+
+---
+
+## Запуск TensorRT (опционально)
+
+```bash
+uv sync --extra trt
+uv run python -m src.main --trt
+```
+
+TensorRT запускает два эксперимента: FP16 и INT8 (с калибровкой).
+
+---
+
 ## Архитектура модели
 
+- **Модель**: UNet (milesial/Pytorch-UNet), предобученная на Carvana
+- **Параметры**: ~14.3M
+- **Scale**: 0.5 (изображения уменьшаются в 2 раза)
+- **Задача**: бинарная сегментация (фон / автомобиль)
+- **Чекпойнт**: загружается автоматически из [GitHub Releases](https://github.com/milesial/Pytorch-UNet/releases/tag/v3.0)
+- **Batch size**: 8 (по умолчанию, настраивается в `src/config.py`)
 
 ---
 
@@ -120,6 +200,7 @@ uv run python -m src.main --tvm --tvm-tune
 - Инференс с `torch.no_grad()` и `torch.amp.autocast("cuda")`
 - Warmup: 20 итераций для прогрева CUDA-ядер
 - Замер GPU latency: CUDA Events (`torch.cuda.Event(enable_timing=True)`)
+- Outlier trimming: p99 отсечение для расчёта mean throughput
 
 ### Метрики
 
@@ -128,3 +209,79 @@ uv run python -m src.main --tvm --tvm-tune
 - **Throughput**: 649.0 samples/s
 
 ---
+
+## torch.compile (max-autotune)
+
+### Методология
+
+- `torch.compile(model, mode="max-autotune-no-cudagraphs")`
+- CUDA Graphs отключены для избежания OOM от private memory pool
+- Пропускаются первые 2 батча (JIT-компиляция)
+
+---
+
+## torchao FP8 / INT8
+
+### FP8
+
+- `Float8DynamicActivationFloat8WeightConfig` — динамическая квантизация активаций и весов в FP8
+- Требует SM 8.9+ (Ada Lovelace / Hopper, например RTX 4090)
+- Оборачивается в `torch.compile(mode="max-autotune-no-cudagraphs")`
+
+### INT8
+
+- `Int8StaticActivationInt8WeightConfig` — статическая квантизация активаций и весов в INT8
+- Калибровка на нескольких батчах train-выборки
+- Требует SM 8.0+ (Ampere)
+- Оборачивается в `torch.compile(mode="max-autotune-no-cudagraphs")`
+
+---
+
+## TVM
+
+### Методология
+
+- ONNX → Relay IR → компиляция под CUDA (с cuDNN/cuBLAS при наличии)
+- FP16: `relay.transform.ToMixedPrecision(float16)` — loss-чувствительные операции остаются в FP32
+- Оптимизации Relay: `SimplifyInference`, `FoldConstant`, `FuseOps`, `CombineParallelConv2D`
+- AutoTVM: XGBTuner с кэшированием результатов в `tmp/tvm_tuning_logs/`
+- Скомпилированные артефакты кэшируются в `tmp/tvm_cache/` (SHA-256 от конфигурации)
+- Запускается как subprocess через `.venv-tvm311/bin/python` (TVM требует Python 3.11)
+- Два режима замера: compute-only (`module.run()`) и e2e (`set_input + run + get_output`)
+
+---
+
+## CLI-аргументы
+
+| Аргумент | Описание |
+|----------|----------|
+| `--download` | Скачать датасет Carvana с Kaggle |
+| `--tvm` | Запустить TVM FP16/FP32 эксперименты |
+| `--tvm-tune` | Включить AutoTVM-тюнинг (медленно при первом запуске) |
+| `--tvm-tune-trials N` | Кол-во триалов AutoTVM (по умолчанию 1000) |
+| `--trt` | Запустить TensorRT FP16/INT8 эксперименты |
+| `--finetune` | Дообучить модель на Carvana |
+| `--finetune-qat` | Quantization-Aware Training |
+| `--profile` | Сохранить chrome traces в `tmp/profiles/` |
+
+---
+
+## Структура проекта
+
+```
+src/
+├── main.py              # Точка входа, CLI, оркестрация пайплайнов
+├── config.py            # Пути, гиперпараметры, device
+├── model.py             # Загрузка модели, torch.compile, torchao-квантизация
+├── data.py              # CarvanaDataset, загрузка и препроцессинг
+├── run_benchmark.py     # PyTorch-бенчмарк (CUDA Events, warmup, метрики)
+├── metrics.py           # mIoU и Dice через confusion matrix
+├── utils.py             # BenchmarkResult, загрузка модели, GPU-утилиты
+├── tvm.py               # Интеграция TVM (subprocess launcher)
+├── _tvm_benchmark.py    # Standalone TVM-скрипт (Python 3.11 subprocess)
+├── trt.py               # TensorRT: ONNX-экспорт, сборка engine, inference
+├── _trt_build.py        # TensorRT subprocess builder
+└── finetune/
+    ├── finetune.py      # Fine-tuning и QAT
+    └── losses.py        # Функции потерь
+```
