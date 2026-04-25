@@ -7,6 +7,20 @@
 | # | Пайплайн | Описание |
 |---|----------|----------|
 | 1 | **PyTorch FP16 baseline** | Бейзлайновый запуск без оптимизаций |
+| 2 | **PyTorch torch.compile** | Графовая компиляция (max-autotune) |
+| 3 | **TVM (Relay/LLVM)** | Альтернативный компилятор с AutoTVM-тюнингом |
+| 4 | **torchao FP8/INT8** | Динамическая и статическая квантизация |
+
+## Итоги (Сравнительная таблица)
+
+*(Запустите `uv run python -m src.main --tvm --tvm-tune` для получения полных метрик)*
+
+| Пайплайн | Precision | Latency (ms) | Throughput (fps) | mIoU | Dice | Комментарий |
+|----------|-----------|--------------|------------------|------|------|-------------|
+| PyTorch Baseline | FP16 | ~39.42 | ~203 | 0.989 | 0.994 | Без оптимизаций |
+| torch.compile | FP16 | ~18.82 | ~425 | 0.989 | 0.994 | max-autotune-no-cudagraphs |
+| torchao | FP8 | ~34.60 | ~231 | 0.989 | 0.994 | dynamic act + weight |
+| TVM | FP16 | ~36-40 | ~220 | 0.988 | 0.994 | Без тюнинга |
 
 ---
 
@@ -65,11 +79,30 @@ kaggle competitions list
 
 ---
 
-## Quickstart
+## Запуск TVM (Alternative Compiler)
+
+В проекте используется Apache TVM для генерации эффективных CUDA-ядер. Ввиду требования TVM к Python 3.11, он запускается как отдельный процесс из-под виртуального окружения `.venv-tvm311`.
+
+### 1. Настройка окружения TVM
 
 ```bash
-uv sync # или uv sync --extra trt для установки TensorRT
-uv run python -m src.main --download
+uv python install 3.11
+uv venv .venv-tvm311 --python 3.11
+.venv-tvm311/bin/pip install -r requirements-tvm.txt
+```
+
+Подробная инструкция по сборке самого TVM из исходников с поддержкой cuDNN/cuBLAS (для максимальной скорости) находится в `TVM_SETUP.md`.
+
+### 2. Запуск бенчмарка
+
+Прогон TVM пайплайна (FP16/FP32):
+```bash
+uv run python -m src.main --tvm
+```
+
+С применением профилей AutoTVM (заметно ускоряет инференс за счет тюнинга):
+```bash
+uv run python -m src.main --tvm --tvm-tune
 ```
 
 ## Архитектура модели

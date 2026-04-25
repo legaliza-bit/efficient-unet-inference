@@ -7,7 +7,7 @@ from loguru import logger
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-from src.config import DEVICE, BATCH_SIZE, DATA_DIR
+from src.config import DEVICE, BATCH_SIZE, DATA_DIR, IMG_SCALE
 from src.utils import load_model, print_results, download_carvana, reset_gpu_state, log_gpu
 from src.data import get_carvana
 from src.finetune.finetune import finetune, finetune_qat
@@ -23,6 +23,13 @@ def main():
                         help="Download Carvana from Kaggle (requires ~/.kaggle/kaggle.json)")
     parser.add_argument("--trt", action="store_true",
                         help="Include TensorRT FP16 experiment (requires tensorrt-cu12)")
+    parser.add_argument("--tvm", action="store_true",
+                        help="Include TVM FP16/FP32 experiments (requires .venv-tvm311)")
+    parser.add_argument("--tvm-tune", action="store_true",
+                        help="Run AutoTVM tuning before TVM compilation (slow but improves performance)")
+    parser.add_argument("--tvm-tune-trials", type=int, default=1000,
+                        help="Number of AutoTVM trials per task (default: 1000). "
+                             "Only used with --tvm --tvm-tune.")
     parser.add_argument("--profile", action="store_true",
                         help="Run torch.profiler on each experiment and save chrome traces to tmp/profiles/")
     args = parser.parse_args()
@@ -130,6 +137,87 @@ def main():
             int8=True, calib_path=CALIB_PATH,
         )
         bench(TRTModel(TRT_INT8_PATH, DEVICE), val_loader, DEVICE, "trt_int8", "int8")
+
+    # ── TVM experiments
+    if args.tvm:
+        from src.config import ONNX_PATH
+        from src.trt import export_to_onnx
+        from src.tvm import run_tvm_benchmark
+
+        # Ensure ONNX export exists
+        if not ONNX_PATH.exists():
+            sample, _ = next(iter(val_loader))
+            export_to_onnx(model, sample, ONNX_PATH)
+
+        carvana_dir = DATA_DIR / "carvana"
+
+        # TVM FP16
+        print("\n── TVM FP16 ──")
+        tvm_fp16_results = run_tvm_benchmark(
+            onnx_path=ONNX_PATH,
+            data_dir=carvana_dir,
+            precision="fp16",
+            batch_size=BATCH_SIZE,
+            img_scale=IMG_SCALE,
+            max_batches=10,
+            tune=args.tvm_tune,
+            tune_trials=args.tvm_tune_trials,
+        )
+        # Convert to BenchmarkResult for consistent output
+        from src.utils import BenchmarkResult
+        tvm_fp16_result = BenchmarkResult(
+            pipeline_name=tvm_fp16_results["pipeline_name"],
+            precision=tvm_fp16_results["precision"],
+            device=tvm_fp16_results["device"],
+            batch_size=tvm_fp16_results["batch_size"],
+            num_batches=tvm_fp16_results.get("num_batches", 0),
+            total_samples=tvm_fp16_results["total_samples"],
+            latency_mean_ms=tvm_fp16_results["latency_compute_mean_ms"],
+            latency_std_ms=tvm_fp16_results["latency_compute_std_ms"],
+            latency_p50_ms=tvm_fp16_results["latency_compute_p50_ms"],
+            latency_p95_ms=tvm_fp16_results["latency_compute_p95_ms"],
+            latency_p99_ms=tvm_fp16_results["latency_compute_p99_ms"],
+            throughput_samples_per_sec=tvm_fp16_results["throughput_compute_samples_per_s"],
+            miou=tvm_fp16_results.get("miou"),
+            dice=tvm_fp16_results.get("dice"),
+            peak_gpu_memory_MB=tvm_fp16_results.get("peak_gpu_memory_MB"),
+        )
+        results.append(tvm_fp16_result)
+        print(f"  TVM FP16 compute: {tvm_fp16_results['latency_compute_mean_ms']:.2f} ms, "
+              f"e2e: {tvm_fp16_results['latency_e2e_mean_ms']:.2f} ms")
+
+        # TVM FP32
+        print("\n── TVM FP32 ──")
+        tvm_fp32_results = run_tvm_benchmark(
+            onnx_path=ONNX_PATH,
+            data_dir=carvana_dir,
+            precision="fp32",
+            batch_size=BATCH_SIZE,
+            img_scale=IMG_SCALE,
+            max_batches=10,
+            tune=args.tvm_tune,
+            tune_trials=args.tvm_tune_trials,
+        )
+        tvm_fp32_result = BenchmarkResult(
+            pipeline_name=tvm_fp32_results["pipeline_name"],
+            precision=tvm_fp32_results["precision"],
+            device=tvm_fp32_results["device"],
+            batch_size=tvm_fp32_results["batch_size"],
+            num_batches=tvm_fp32_results.get("num_batches", 0),
+            total_samples=tvm_fp32_results["total_samples"],
+            latency_mean_ms=tvm_fp32_results["latency_compute_mean_ms"],
+            latency_std_ms=tvm_fp32_results["latency_compute_std_ms"],
+            latency_p50_ms=tvm_fp32_results["latency_compute_p50_ms"],
+            latency_p95_ms=tvm_fp32_results["latency_compute_p95_ms"],
+            latency_p99_ms=tvm_fp32_results["latency_compute_p99_ms"],
+            throughput_samples_per_sec=tvm_fp32_results["throughput_compute_samples_per_s"],
+            miou=tvm_fp32_results.get("miou"),
+            dice=tvm_fp32_results.get("dice"),
+            peak_gpu_memory_MB=tvm_fp32_results.get("peak_gpu_memory_MB"),
+        )
+        results.append(tvm_fp32_result)
+        print(f"  TVM FP32 compute: {tvm_fp32_results['latency_compute_mean_ms']:.2f} ms, "
+              f"e2e: {tvm_fp32_results['latency_e2e_mean_ms']:.2f} ms")
 
     print_results(results)
 

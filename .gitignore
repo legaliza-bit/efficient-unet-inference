@@ -9,3 +9,6 @@ venv/
 
 tmp/
 data/
+
+.venv-tvm/
+.venv-tvm311/
