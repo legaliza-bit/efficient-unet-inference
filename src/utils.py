@@ -7,7 +7,7 @@ from loguru import logger
 from pathlib import Path
 
 
-def set_seed():
+def set_seed(worker_id):
     seed = torch.initial_seed() % 2**32
     np.random.seed(seed)
     random.seed(seed)

@@ -133,7 +133,7 @@ def download_carvana() -> None:
         if not zip_path.exists():
             logger.info(f"Downloading {filename} …")
             subprocess.run(
-                ["kaggle", "competitions", "download", "-c", COMPETITION, "-f", filename, "-p", str(DATA_DIR)],
+                ["kaggle", "competitions", "download", "-c", COMPETITION, "-f", f"{filename}.zip", "-p", str(DATA_DIR)],
                 check=True,
             )
 

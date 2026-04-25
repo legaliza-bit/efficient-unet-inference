@@ -8,12 +8,10 @@ from loguru import logger
 import numpy as np
 from pathlib import Path
 
-from src.utils import (
-    reset_gpu_state, warmup_model, get_model_size_mb
-)
+from src.utils import reset_gpu_state, get_model_size_mb
 from src.metrics import update_conf_matrix, compute_miou_dice
 from src.config import NUM_CLASSES, PROFILE_DIR, RESULTS_DIR
-from src.model import forward
+from src.model import forward, warmup_model
 
 
 @dataclass
@@ -100,7 +98,6 @@ def run_benchmark(
     device,
     pipeline_name: str,
     precision: str = "fp16",
-    num_classes: int = NUM_CLASSES,
     profile: bool = False,
 ) -> BenchmarkResult:
     model = model.to(device)
@@ -117,7 +114,7 @@ def run_benchmark(
 
     latencies = []
     total_samples = 0
-    conf_matrix = torch.zeros((num_classes, num_classes), dtype=torch.int64, device=device)
+    conf_matrix = torch.zeros((NUM_CLASSES, NUM_CLASSES), dtype=torch.int64, device=device)
 
     if device.type == "cuda":
         start_event = torch.cuda.Event(enable_timing=True)
@@ -143,7 +140,7 @@ def run_benchmark(
             pred = torch.argmax(out, dim=1)
             latencies.append(lat)
             total_samples += batch_size
-            update_conf_matrix(conf_matrix, pred, y, num_classes)
+            update_conf_matrix(conf_matrix, pred, y, NUM_CLASSES)
 
     arr = np.array(latencies)
     total_time_sec = arr.sum() / 1000.0

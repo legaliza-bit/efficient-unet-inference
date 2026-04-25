@@ -48,11 +48,12 @@ def main():
     parser.add_argument("--engine", required=True)
     parser.add_argument("--workspace-gb", type=int, default=2)
     parser.add_argument("--fp16", action="store_true")
+    parser.add_argument("--fp8", action="store_true")
     parser.add_argument("--int8", action="store_true")
     parser.add_argument("--calib-data")
     args = parser.parse_args()
 
-    logger = trt.Logger(trt.Logger.WARNING)
+    logger = trt.Logger(trt.Logger.ERROR)
     builder = trt.Builder(logger)
     explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(explicit_batch)
@@ -73,13 +74,18 @@ def main():
         trt.MemoryPoolType.WORKSPACE, args.workspace_gb << 30
     )
 
-    calib_batch = _NumpyCalibrator._BATCH if args.int8 else 8
+    calib_batch = _NumpyCalibrator._BATCH if (args.int8 or args.fp8) else 8
     profile = builder.create_optimization_profile()
     profile.set_shape("input", (1, C, H, W), (calib_batch, C, H, W), (16, C, H, W))
     config.add_optimization_profile(profile)
 
     if args.fp16:
         config.set_flag(trt.BuilderFlag.FP16)
+
+    if args.fp8:
+        config.set_flag(trt.BuilderFlag.FP8)
+        config.set_flag(trt.BuilderFlag.FP16)
+        config.int8_calibrator = _NumpyCalibrator(args.calib_data)
 
     if args.int8:
         config.set_flag(trt.BuilderFlag.INT8)
@@ -90,7 +96,6 @@ def main():
         raise RuntimeError("Engine build returned None")
 
     Path(args.engine).write_bytes(serialized)
-    print("Engine saved.")
 
 
 if __name__ == "__main__":

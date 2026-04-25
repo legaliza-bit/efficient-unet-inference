@@ -13,6 +13,7 @@ CKPT_PATH = TMP_DIR / "unet_carvana.pt"
 QAT_CKPT_PATH = TMP_DIR / "unet_carvana_qat.pt"
 ONNX_PATH = TMP_DIR / "unet_carvana.onnx"
 TRT_FP16_PATH = TMP_DIR / "unet_carvana_fp16.engine"
+TRT_FP8_PATH = TMP_DIR / "unet_carvana_fp8.engine"
 TRT_INT8_PATH = TMP_DIR / "unet_carvana_int8.engine"
 CALIB_PATH = TMP_DIR / "calib_data.npy"
 

@@ -43,6 +43,7 @@ def build_trt_engine(
     engine_path: Path,
     *,
     fp16: bool = False,
+    fp8: bool = False,
     int8: bool = False,
     calib_path: Path = None,
     workspace_gb: int = 2,
@@ -58,6 +59,8 @@ def build_trt_engine(
     ]
     if fp16:
         cmd.append("--fp16")
+    if fp8:
+        cmd.extend(["--fp8", "--calib-data", str(calib_path)])
     if int8:
         cmd.extend(["--int8", "--calib-data", str(calib_path)])
     result = subprocess.run(cmd)
