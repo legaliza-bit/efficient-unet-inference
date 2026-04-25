@@ -88,7 +88,7 @@ kaggle competitions list
 ```bash
 uv python install 3.11
 uv venv .venv-tvm311 --python 3.11
-.venv-tvm311/bin/pip install -r requirements-tvm.txt
+uv pip install --python .venv-tvm311/bin/python -r requirements-tvm.txt
 ```
 
 Подробная инструкция по сборке самого TVM из исходников с поддержкой cuDNN/cuBLAS (для максимальной скорости) находится в `TVM_SETUP.md`.
