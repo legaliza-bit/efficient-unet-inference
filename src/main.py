@@ -183,6 +183,7 @@ def main():
             miou=tvm_fp16_results.get("miou"),
             dice=tvm_fp16_results.get("dice"),
             peak_gpu_memory_MB=tvm_fp16_results.get("peak_gpu_memory_MB"),
+            model_size_MB=0.0,
         )
         results.append(tvm_fp16_result)
         print(f"  TVM FP16 compute: {tvm_fp16_results['latency_compute_mean_ms']:.2f} ms, "
@@ -216,6 +217,7 @@ def main():
             miou=tvm_fp32_results.get("miou"),
             dice=tvm_fp32_results.get("dice"),
             peak_gpu_memory_MB=tvm_fp32_results.get("peak_gpu_memory_MB"),
+            model_size_MB=0.0,
         )
         results.append(tvm_fp32_result)
         print(f"  TVM FP32 compute: {tvm_fp32_results['latency_compute_mean_ms']:.2f} ms, "
