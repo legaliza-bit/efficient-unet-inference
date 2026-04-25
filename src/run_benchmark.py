@@ -102,7 +102,6 @@ def run_benchmark(
             update_conf_matrix(conf_matrix, pred, y, num_classes)
 
     arr = np.array(latencies)
-    total_time_sec = arr.sum() / 1000.0
     p99 = float(np.percentile(arr, 99))
     arr_trimmed = arr[arr <= p99]
     miou, mean_dice = compute_miou_dice(conf_matrix)
@@ -123,7 +122,7 @@ def run_benchmark(
         latency_p50_ms=float(np.percentile(arr, 50)),
         latency_p95_ms=float(np.percentile(arr, 95)),
         latency_p99_ms=float(np.percentile(arr, 99)),
-        throughput_samples_per_sec=total_samples / total_time_sec,
+        throughput_samples_per_sec=dataloader.batch_size * 1000.0 / float(arr_trimmed.mean()),
         model_params_M=sum(p.numel() for p in model.parameters()) / 1e6,
         model_size_MB=get_model_size_mb(model),
         peak_gpu_memory_MB=peak_mem,

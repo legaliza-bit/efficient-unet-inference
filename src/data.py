@@ -3,9 +3,9 @@ from pathlib import Path
 import numpy as np
 import torch
 from PIL import Image
-from torch.utils.data import Dataset, random_split
+from torch.utils.data import ConcatDataset, Dataset, random_split
 
-from src.config import DATA_DIR, IMG_SCALE
+from src.config import DATA_DIR, DATASET_REPEAT, IMG_SCALE
 
 
 class CarvanaDataset(Dataset):
@@ -90,4 +90,9 @@ def get_carvana(split: str = "train", val_fraction: float = 0.1, scale: float = 
         ds, [n_train, n_val],
         generator=torch.Generator().manual_seed(42),
     )
+
+    if DATASET_REPEAT > 1:
+        train_ds = ConcatDataset([train_ds] * DATASET_REPEAT)
+        val_ds = ConcatDataset([val_ds] * DATASET_REPEAT)
+
     return train_ds if split == "train" else val_ds
