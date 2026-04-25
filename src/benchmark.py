@@ -1,24 +1,78 @@
+import json
 import time
 import torch
+from dataclasses import dataclass, asdict
+
 from torch.profiler import ProfilerActivity
 from loguru import logger
 import numpy as np
+from pathlib import Path
 
 from src.utils import (
-    BenchmarkResult, reset_gpu_state, warmup_model, get_model_size_mb,
+    reset_gpu_state, warmup_model, get_model_size_mb
 )
 from src.metrics import update_conf_matrix, compute_miou_dice
-from src.config import NUM_CLASSES, PROFILE_DIR
+from src.config import NUM_CLASSES, PROFILE_DIR, RESULTS_DIR
+from src.model import forward
 
 
-def _forward(model, x: torch.Tensor, precision: str) -> torch.Tensor:
-    if precision != "fp32" and x.device.type == "cuda":
-        with torch.amp.autocast("cuda", dtype=torch.float16):
-            return model(x)
-    return model(x)
+@dataclass
+class BenchmarkResult:
+    pipeline_name: str
+    precision: str
+    device: str
+    batch_size: int
+    num_batches: int
+    total_samples: int
+
+    latency_mean_ms: float
+    latency_p50_ms: float
+    latency_p95_ms: float
+    latency_p99_ms: float
+    latency_std_ms: float
+
+    throughput_samples_per_sec: float
+
+    model_params_M: float | None = None
+    model_size_MB: float | None = None
+    peak_gpu_memory_MB: float | None = None
+
+    miou: float | None = None
+    dice: float | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def save(self, path: str | Path) -> None:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(self.to_dict(), f, indent=2)
+
+    @classmethod
+    def load(cls, path: str | Path):
+        with open(path) as f:
+            return cls(**json.load(f))
+
+    def __str__(self) -> str:
+        mem = f"{self.peak_gpu_memory_MB:.0f} MB" if self.peak_gpu_memory_MB else "n/a"
+        lines = [
+            f"Pipeline:    {self.pipeline_name}",
+            f"Precision:   {self.precision}",
+            f"Device:      {self.device}",
+            f"Batch size:  {self.batch_size}",
+            f"Samples:     {self.total_samples}",
+            f"Latency:     {self.latency_mean_ms:.2f} ± "
+            f"{self.latency_std_ms:.2f} ms "
+            f"(p50={self.latency_p50_ms:.2f}, p95={self.latency_p95_ms:.2f})",
+            f"Throughput:  {self.throughput_samples_per_sec:.1f} samples/s",
+            f"Peak GPU mem:{mem}",
+            f"mIoU:        {self.miou}",
+            f"Dice:        {self.dice}",
+        ]
+        return "\n".join(lines)
 
 
-def _profile(model, dataloader, device, pipeline_name: str, precision: str) -> None:
+def profile(model, dataloader, device, pipeline_name: str, precision: str) -> None:
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     sched = torch.profiler.schedule(wait=1, warmup=1, active=3)
     with torch.profiler.profile(
@@ -31,13 +85,13 @@ def _profile(model, dataloader, device, pipeline_name: str, precision: str) -> N
             if i >= 5:
                 break
             with torch.no_grad():
-                _forward(model, x.to(device), precision)
+                forward(model, x.to(device), precision)
             prof.step()
 
     trace_path = PROFILE_DIR / f"{pipeline_name}.json"
     prof.export_chrome_trace(str(trace_path))
-    print(f"  Profile trace → {trace_path}")
-    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    logger.info(f"  Profile trace → {trace_path}")
+    logger.info(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
 
 def run_benchmark(
@@ -52,8 +106,6 @@ def run_benchmark(
     model = model.to(device)
     model.eval()
 
-    reset_gpu_state()
-
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
 
@@ -61,7 +113,7 @@ def run_benchmark(
     warmup_model(model, dummy_input, n_iters=20, device=device, precision=precision)
 
     if profile:
-        _profile(model, dataloader, device, pipeline_name, precision)
+        profile(model, dataloader, device, pipeline_name, precision)
 
     latencies = []
     total_samples = 0
@@ -79,13 +131,13 @@ def run_benchmark(
             if device.type == "cuda":
                 torch.cuda.synchronize()
                 start_event.record()
-                out = _forward(model, x, precision)
+                out = forward(model, x, precision)
                 end_event.record()
                 torch.cuda.synchronize()
                 lat = start_event.elapsed_time(end_event)
             else:
                 t0 = time.perf_counter()
-                out = _forward(model, x, precision)
+                out = forward(model, x, precision)
                 lat = (time.perf_counter() - t0) * 1000
 
             pred = torch.argmax(out, dim=1)
@@ -122,6 +174,14 @@ def run_benchmark(
         miou=miou,
         dice=mean_dice,
     )
-
     logger.info(result)
+
+    summary_path = RESULTS_DIR / "summary.json"
+    existing = json.loads(summary_path.read_text()) if summary_path.exists() else []
+    existing.append(result.to_dict())
+    summary_path.write_text(json.dumps(existing, indent=2))
+
+    del model
+    reset_gpu_state()
+
     return result

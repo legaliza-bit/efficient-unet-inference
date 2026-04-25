@@ -1,5 +1,7 @@
 import copy
+import random
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -11,14 +13,17 @@ from src.config import (
 )
 from src.finetune.losses import CombinedLoss
 from src.metrics import mean_iou
+from src.utils import set_seed
 
 
 def _make_loaders(num_workers=4):
     train_ds = get_carvana("train")
     val_ds = get_carvana("val")
+    g = torch.Generator().manual_seed(42)
     train_loader = DataLoader(
         train_ds, batch_size=BATCH_SIZE, shuffle=True,
         num_workers=num_workers, pin_memory=True,
+        worker_init_fn=set_seed, generator=g,
     )
     val_loader = DataLoader(
         val_ds, batch_size=BATCH_SIZE, shuffle=False,

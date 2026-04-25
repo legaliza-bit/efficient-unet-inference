@@ -1,32 +1,58 @@
 import copy
 import torch
+from loguru import logger
 from torchao.quantization import quantize_, Float8WeightOnlyConfig, Int8DynamicActivationInt8WeightConfig
 
-from src.config import IMG_SCALE
+from src.config import IMG_SCALE, CKPT_PATH
+from typing import Callable
 
 
-_CHECKPOINTS = {
-    0.5: "https://github.com/milesial/Pytorch-UNet/releases/download/v3.0/unet_carvana_scale0.5_epoch2.pth",
-    1.0: "https://github.com/milesial/Pytorch-UNet/releases/download/v3.0/unet_carvana_scale1.0_epoch2.pth",
-}
-
-
-def build_model(scale=IMG_SCALE):
-    """Load milesial/Pytorch-UNet pretrained on Carvana, always to CPU."""
-    model = torch.hub.load(
-        "milesial/Pytorch-UNet",
-        "unet_carvana",
-        pretrained=False,
-        scale=scale,
-    )
-    if scale not in _CHECKPOINTS:
-        raise ValueError(f"No pretrained checkpoint for scale={scale}. Use 0.5 or 1.0.")
-    state_dict = torch.hub.load_state_dict_from_url(
-        _CHECKPOINTS[scale], map_location="cpu", progress=True
-    )
-    state_dict.pop("mask_values", None)
-    model.load_state_dict(state_dict)
+def load_model(pretrained=True):
+    """Load milesial/Pytorch-UNet pretrained on Carvana."""
+    if CKPT_PATH.exists():
+        model = torch.hub.load(
+            "milesial/Pytorch-UNet",
+            "unet_carvana",
+            pretrained=False,
+            scale=IMG_SCALE,
+        )
+        model.load_state_dict(torch.load(CKPT_PATH, map_location="cpu"))
+        logger.info(f"Loaded checkpoint: {CKPT_PATH}")
+    else:
+        model = torch.hub.load(
+            "milesial/Pytorch-UNet",
+            "unet_carvana",
+            pretrained=pretrained,
+            scale=IMG_SCALE,
+        )
+        print("Loaded pretrained U-Net")
     return model
+
+
+def warmup_model(
+    model: Callable,
+    dummy_input: torch.Tensor,
+    n_iters: int = 10,
+    device: torch.device | None = None,
+    precision: str = "fp32",
+) -> None:
+    use_amp = precision != "fp32" and device is not None and device.type == "cuda"
+    with torch.no_grad():
+        for _ in range(n_iters):
+            if use_amp:
+                with torch.amp.autocast("cuda", dtype=torch.float16):
+                    _ = model(dummy_input)
+            else:
+                _ = model(dummy_input)
+    if device and device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
+def forward(model, x: torch.Tensor, precision: str) -> torch.Tensor:
+    if precision != "fp32" and x.device.type == "cuda":
+        with torch.amp.autocast("cuda", dtype=torch.float16):
+            return model(x)
+    return model(x)
 
 
 def apply_compiled(model):

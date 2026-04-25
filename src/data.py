@@ -1,11 +1,41 @@
 from pathlib import Path
-
+import json
+import zipfile
+import subprocess
 import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, random_split
+from torchvision.transforms import v2
+from torchvision import tv_tensors
+from loguru import logger
 
-from src.config import DATA_DIR, IMG_SCALE
+from src.config import DATA_DIR, IMG_SCALE, COMPETITION, IMGS_DIR, MASKS_DIR
+
+
+def _train_augmentations() -> v2.Compose:
+    return v2.Compose([
+        v2.RandomHorizontalFlip(p=0.5),
+        v2.RandomRotation(degrees=10),
+        v2.RandomPerspective(distortion_scale=0.2, p=0.3),
+        v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+        v2.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
+        v2.RandomAdjustSharpness(sharpness_factor=2, p=0.3),
+    ])
+
+
+class AugmentedSubset(Dataset):
+    def __init__(self, subset, transform: v2.Compose):
+        self.subset = subset
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.subset)
+
+    def __getitem__(self, idx):
+        img, mask = self.subset[idx]
+        img, mask = self.transform(tv_tensors.Image(img), tv_tensors.Mask(mask))
+        return img.as_subclass(torch.Tensor), mask.as_subclass(torch.Tensor)
 
 
 class CarvanaDataset(Dataset):
@@ -80,14 +110,36 @@ class CarvanaDataset(Dataset):
 
 
 def get_carvana(split: str = "train", val_fraction: float = 0.1, scale: float = IMG_SCALE):
-    imgs_dir = DATA_DIR / "carvana" / "imgs"
-    masks_dir = DATA_DIR / "carvana" / "masks"
-
-    ds = CarvanaDataset(imgs_dir, masks_dir, scale=scale)
+    ds = CarvanaDataset(IMGS_DIR, MASKS_DIR, scale=scale)
     n_val = max(1, int(len(ds) * val_fraction))
     n_train = len(ds) - n_val
     train_ds, val_ds = random_split(
         ds, [n_train, n_val],
         generator=torch.Generator().manual_seed(42),
     )
-    return train_ds if split == "train" else val_ds
+    if split == "train":
+        return AugmentedSubset(train_ds, _train_augmentations())
+    return val_ds
+
+
+def download_carvana() -> None:
+    """Download Carvana images and masks from Kaggle into dest_dir."""
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    for filename in "train", "train_masks":
+        zip_path = DATA_DIR / f"{filename}.zip"
+
+        if not zip_path.exists():
+            logger.info(f"Downloading {filename} …")
+            subprocess.run(
+                ["kaggle", "competitions", "download", "-c", COMPETITION, "-f", filename, "-p", str(DATA_DIR)],
+                check=True,
+            )
+
+        logger.info(f"Extracting {filename} …")
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(DATA_DIR)
+        zip_path.unlink()
+
+    logger.info("Carvana dataset ready.")

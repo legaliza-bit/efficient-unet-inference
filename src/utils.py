@@ -1,112 +1,16 @@
 import gc
-import json
-import zipfile
 import torch
-from dataclasses import dataclass, asdict
+import numpy as np
+import random
+
+from loguru import logger
 from pathlib import Path
-from typing import Callable, Optional
-
-from src.config import CKPT_PATH
-from src.model import build_model
 
 
-def log_gpu(tag: str):
-    if torch.cuda.is_available():
-        alloc = torch.cuda.memory_allocated() / 1024**2
-        reserv = torch.cuda.memory_reserved() / 1024**2
-        free, total = torch.cuda.mem_get_info()
-        free = free / 1024**2
-        total = total / 1024**2
-
-        print(
-            f"[GPU {tag}] "
-            f"allocated={alloc:.1f}MB | reserved={reserv:.1f}MB | "
-            f"free={free:.1f}MB | total={total:.1f}MB"
-        )
-
-@dataclass
-class BenchmarkResult:
-    pipeline_name: str
-    precision: str
-    device: str
-    batch_size: int
-    num_batches: int
-    total_samples: int
-
-    latency_mean_ms: float
-    latency_p50_ms: float
-    latency_p95_ms: float
-    latency_p99_ms: float
-    latency_std_ms: float
-
-    throughput_samples_per_sec: float
-
-    model_params_M: Optional[float] = None
-    model_size_MB: Optional[float] = None
-    peak_gpu_memory_MB: Optional[float] = None
-
-    miou: Optional[float] = None
-    dice: Optional[float] = None
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    def save(self, path: str | Path) -> None:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
-
-    @classmethod
-    def load(cls, path: str | Path):
-        with open(path) as f:
-            return cls(**json.load(f))
-
-    def __str__(self) -> str:
-        mem = f"{self.peak_gpu_memory_MB:.0f} MB" if self.peak_gpu_memory_MB else "n/a"
-        lines = [
-            f"Pipeline:    {self.pipeline_name}",
-            f"Precision:   {self.precision}",
-            f"Device:      {self.device}",
-            f"Batch size:  {self.batch_size}",
-            f"Samples:     {self.total_samples}",
-            f"Latency:     {self.latency_mean_ms:.2f} ± "
-            f"{self.latency_std_ms:.2f} ms "
-            f"(p50={self.latency_p50_ms:.2f}, p95={self.latency_p95_ms:.2f})",
-            f"Throughput:  {self.throughput_samples_per_sec:.1f} samples/s",
-            f"Peak GPU mem:{mem}",
-            f"mIoU:        {self.miou}",
-            f"Dice:        {self.dice}",
-        ]
-        return "\n".join(lines)
-
-
-def load_model():
-    model = build_model()
-    if CKPT_PATH.exists():
-        model.load_state_dict(torch.load(CKPT_PATH, map_location="cpu"))
-        print(f"Loaded checkpoint: {CKPT_PATH}")
-    else:
-        print("No checkpoint found — using milesial/Pytorch-UNet pretrained weights.")
-    return model
-
-
-def warmup_model(
-    model: Callable,
-    dummy_input: torch.Tensor,
-    n_iters: int = 10,
-    device: Optional[torch.device] = None,
-    precision: str = "fp32",
-) -> None:
-    use_amp = precision != "fp32" and device is not None and device.type == "cuda"
-    with torch.no_grad():
-        for _ in range(n_iters):
-            if use_amp:
-                with torch.amp.autocast("cuda", dtype=torch.float16):
-                    _ = model(dummy_input)
-            else:
-                _ = model(dummy_input)
-    if device and device.type == "cuda":
-        torch.cuda.synchronize(device)
+def set_seed():
+    seed = torch.initial_seed() % 2**32
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 def get_model_size_mb(model) -> float:
@@ -127,7 +31,7 @@ def print_results(results):
     print("─" * len(header))
     for r in results:
         gpu_mem = f"{r.peak_gpu_memory_MB:.0f}" if r.peak_gpu_memory_MB else "n/a"
-        dev = r.device.split(":")[0]  # "cuda:0" → "cuda"
+        dev = r.device.split(":")[0]
         print(
             f"{r.pipeline_name:<22} {r.precision:<6} {dev:<5} "
             f"{r.latency_mean_ms:<10.1f} {r.latency_p95_ms:<9.1f} "
@@ -136,76 +40,19 @@ def print_results(results):
         )
 
 
-def _validate_zip(zip_path: Path) -> bool:
-    """Return True if *zip_path* is a valid, non-corrupted zip archive."""
-    try:
-        with zipfile.ZipFile(zip_path) as zf:
-            bad = zf.testzip()
-            return bad is None  # None means every entry is OK
-    except (zipfile.BadZipFile, OSError):
-        return False
+def log_gpu(tag: str):
+    if torch.cuda.is_available():
+        alloc = torch.cuda.memory_allocated() / 1024**2
+        reserv = torch.cuda.memory_reserved() / 1024**2
+        free, total = torch.cuda.mem_get_info()
+        free = free / 1024**2
+        total = total / 1024**2
 
-
-def download_carvana(dest_dir: Path) -> None:
-    """Download Carvana images and masks from Kaggle into dest_dir.
-
-    Requires ~/.kaggle/kaggle.json and competition rules accepted at
-    kaggle.com/c/carvana-image-masking-challenge.
-    Result layout: dest_dir/imgs/  and  dest_dir/masks/
-    """
-    import subprocess
-
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    comp = "carvana-image-masking-challenge"
-
-    for filename, folder_name, label in [
-        ("train.zip",       "train",       "imgs"),
-        ("train_masks.zip", "train_masks", "masks"),
-    ]:
-        zip_path = dest_dir / filename
-
-        # If a corrupted zip exists from a previous failed download, delete it
-        # so the kaggle CLI doesn't skip re-downloading it.
-        if zip_path.exists():
-            if _validate_zip(zip_path):
-                print(f"{filename} already exists and is valid, skipping download.")
-            else:
-                print(f"{filename} exists but is corrupted, deleting and re-downloading …")
-                zip_path.unlink()
-
-        if not zip_path.exists():
-            print(f"Downloading {filename} …")
-            subprocess.run(
-                ["kaggle", "competitions", "download", "-c", comp, "-f", filename, "-p", str(dest_dir)],
-                check=True,
-            )
-
-        # Validate the downloaded zip before extraction; retry with --force if
-        # it is corrupted (e.g. interrupted download, stale cache).
-        if not _validate_zip(zip_path):
-            print(f"{filename} is corrupted after download, retrying with --force …")
-            zip_path.unlink()
-            subprocess.run(
-                ["kaggle", "competitions", "download", "-c", comp, "-f", filename, "-p", str(dest_dir), "--force"],
-                check=True,
-            )
-            if not _validate_zip(zip_path):
-                raise zipfile.BadZipFile(
-                    f"{filename} is still corrupted after forced re-download. "
-                    "Check your network connection and Kaggle credentials."
-                )
-
-        print(f"Extracting {filename} …")
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(dest_dir)
-        zip_path.unlink()
-
-        extracted = dest_dir / folder_name
-        target = dest_dir / label
-        if extracted.exists() and not target.exists():
-            extracted.rename(target)
-
-    print("Carvana dataset ready.")
+        logger.info(
+            f"[GPU {tag}] "
+            f"allocated={alloc:.1f}MB | reserved={reserv:.1f}MB | "
+            f"free={free:.1f}MB | total={total:.1f}MB"
+        )
 
 
 def reset_gpu_state() -> None:
