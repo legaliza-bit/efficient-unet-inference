@@ -18,7 +18,7 @@ def export_to_onnx(model, sample_input: torch.Tensor, onnx_path: Path) -> None:
             "input": {0: "batch_size"},
             "output": {0: "batch_size"},
         },
-        opset_version=17,
+        opset_version=18,
     )
     print(f"Exported ONNX model to {onnx_path}")
 
