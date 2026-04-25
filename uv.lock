@@ -188,6 +188,8 @@ dependencies = [
     { name = "kaggle" },
     { name = "loguru" },
     { name = "numpy" },
+    { name = "onnx" },
+    { name = "onnxscript" },
     { name = "pre-commit" },
     { name = "ruff" },
     { name = "torch" },
@@ -197,8 +199,6 @@ dependencies = [
 
 [package.optional-dependencies]
 trt = [
-    { name = "onnx" },
-    { name = "onnxscript" },
     { name = "tensorrt-cu12" },
 ]
 
@@ -207,8 +207,8 @@ requires-dist = [
     { name = "kaggle", specifier = ">=2.0.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "numpy", specifier = ">=2.4.4" },
-    { name = "onnx", marker = "extra == 'trt'" },
-    { name = "onnxscript", marker = "extra == 'trt'" },
+    { name = "onnx" },
+    { name = "onnxscript" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "ruff", specifier = ">=0.15.8" },
     { name = "tensorrt-cu12", marker = "extra == 'trt'", specifier = ">=10.0.0" },
