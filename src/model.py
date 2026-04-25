@@ -1,6 +1,6 @@
 import copy
 import torch
-from torchao.quantization import quantize_, Float8WeightOnlyConfig, Int8DynamicActivationInt8WeightConfig
+from torchao.quantization import quantize_, Float8DynamicActivationFloat8WeightConfig, Int8StaticActivationInt8WeightConfig
 
 from src.config import IMG_SCALE
 
@@ -34,15 +34,27 @@ def apply_compiled(model):
     return torch.compile(model, mode="max-autotune-no-cudagraphs")
 
 
-def apply_int8(model):
-    """INT8 dynamic activation + weight quantization via torchao (GPU)."""
+def apply_int8(model, calib_dataloader=None):
+    """INT8 static activation + weight quantization via torchao (GPU).
+
+    If *calib_dataloader* is provided, a few batches are forwarded to
+    collect activation statistics for static quantization.
+    """
     model = copy.deepcopy(model).cuda().eval()
-    quantize_(model, Int8DynamicActivationInt8WeightConfig())
+    quantize_(model, Int8StaticActivationInt8WeightConfig())
+    # Calibration: run representative data to collect activation statistics
+    if calib_dataloader is not None:
+        with torch.no_grad():
+            for i, (images, _) in enumerate(calib_dataloader):
+                images = images.cuda()
+                model(images)
+                if i >= 2:  # A few batches is enough for calibration
+                    break
     return model
 
 
 def apply_fp8(model):
-    """FP8 weight-only quantization via torchao (requires SM 8.9+, e.g. RTX 4090)."""
+    """FP8 dynamic activation + weight quantization via torchao (requires SM 8.9+, e.g. RTX 4090)."""
     model = copy.deepcopy(model).cuda().eval()
-    quantize_(model, Float8WeightOnlyConfig())
+    quantize_(model, Float8DynamicActivationFloat8WeightConfig())
     return model

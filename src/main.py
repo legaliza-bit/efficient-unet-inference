@@ -3,6 +3,7 @@ import os
 
 import torch
 from torch.utils.data import DataLoader
+from loguru import logger
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -40,6 +41,12 @@ def main():
     if torch.cuda.is_available():
         for i in range(torch.cuda.device_count()):
             print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+        major, minor = torch.cuda.get_device_capability()
+        sm = major * 10 + minor
+        if sm < 80:
+            logger.warning("INT8 tensor cores require SM 80+ (Ampere). Performance may be limited.")
+        if sm < 89:
+            logger.warning("FP8 tensor cores require SM 89+ (Ada Lovelace/Hopper). FP8 will use emulation.")
 
     model = load_model()
 
@@ -55,6 +62,11 @@ def main():
     val_ds = get_carvana("val")
     val_loader = DataLoader(
         val_ds, batch_size=BATCH_SIZE, shuffle=False,
+        num_workers=4, pin_memory=(DEVICE.type == "cuda"),
+    )
+    train_ds = get_carvana("train")
+    train_loader = DataLoader(
+        train_ds, batch_size=BATCH_SIZE, shuffle=True,
         num_workers=4, pin_memory=(DEVICE.type == "cuda"),
     )
     results = []
@@ -77,14 +89,18 @@ def main():
 
     # ── 2. torch.compile FP16 (GPU) ──────────────────────────────
     print("\nCompiling model (first run will be slow)…")
-    bench(apply_compiled(model), val_loader, DEVICE, "compile_fp16", "fp16")
+    bench(apply_compiled(model), val_loader, DEVICE, "compile_fp16", "fp16",
+          skip_batches=2)
 
     # ── 3. FP8 torchao (GPU, SM 8.9+) ───────────────────────────
-    print("\nApplying FP8 weight quantization (torchao)…")
-    bench(apply_fp8(model), val_loader, DEVICE, "fp8_torchao", "fp8")
+    print("\nApplying FP8 dynamic activation + weight quantization (torchao)…")
+    bench(torch.compile(apply_fp8(model), mode="max-autotune-no-cudagraphs"),
+          val_loader, DEVICE, "fp8_torchao", "fp8", skip_batches=2)
 
     # ── 4. torchao INT8 (GPU) ────────────────────────────────────
-    bench(apply_int8(model), val_loader, DEVICE, "int8_torchao", "int8")
+    print("\nApplying INT8 static activation + weight quantization (torchao)…")
+    bench(torch.compile(apply_int8(model, calib_dataloader=train_loader), mode="max-autotune-no-cudagraphs"),
+          val_loader, DEVICE, "int8_torchao", "int8", skip_batches=2)
 
     # ── 5 & 6. TRT experiments (GPU) ─────────────────────────────
     if args.trt:

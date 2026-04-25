@@ -12,7 +12,7 @@ from src.config import NUM_CLASSES, PROFILE_DIR
 
 
 def _forward(model, x: torch.Tensor, precision: str) -> torch.Tensor:
-    if precision != "fp32" and x.device.type == "cuda":
+    if precision == "fp16" and x.device.type == "cuda":
         with torch.amp.autocast("cuda", dtype=torch.float16):
             return model(x)
     return model(x)
@@ -48,6 +48,7 @@ def run_benchmark(
     precision: str = "fp16",
     num_classes: int = NUM_CLASSES,
     profile: bool = False,
+    skip_batches: int = 0,
 ) -> BenchmarkResult:
     model = model.to(device)
     model.eval()
@@ -72,25 +73,32 @@ def run_benchmark(
         end_event = torch.cuda.Event(enable_timing=True)
 
     with torch.no_grad():
-        for x, y in dataloader:
+        for batch_idx, (x, y) in enumerate(dataloader):
             x, y = x.to(device), y.to(device)
             batch_size = x.size(0)
 
-            if device.type == "cuda":
-                torch.cuda.synchronize()
-                start_event.record()
+            if batch_idx < skip_batches:
+                # Warmup pass — run forward but don't record latency.
                 out = _forward(model, x, precision)
-                end_event.record()
-                torch.cuda.synchronize()
-                lat = start_event.elapsed_time(end_event)
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
             else:
-                t0 = time.perf_counter()
-                out = _forward(model, x, precision)
-                lat = (time.perf_counter() - t0) * 1000
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+                    start_event.record()
+                    out = _forward(model, x, precision)
+                    end_event.record()
+                    torch.cuda.synchronize()
+                    lat = start_event.elapsed_time(end_event)
+                else:
+                    t0 = time.perf_counter()
+                    out = _forward(model, x, precision)
+                    lat = (time.perf_counter() - t0) * 1000
+
+                latencies.append(lat)
+                total_samples += batch_size
 
             pred = torch.argmax(out, dim=1)
-            latencies.append(lat)
-            total_samples += batch_size
             update_conf_matrix(conf_matrix, pred, y, num_classes)
 
     arr = np.array(latencies)
