@@ -101,11 +101,13 @@ def main():
 
     # ── 3. FP8 torchao (GPU, SM 8.9+) ───────────────────────────
     print("\nApplying FP8 dynamic activation + weight quantization (torchao)…")
+    reset_gpu_state()
     bench(torch.compile(apply_fp8(model), mode="max-autotune-no-cudagraphs"),
           val_loader, DEVICE, "fp8_torchao", "fp8", skip_batches=2)
 
     # ── 4. torchao INT8 (GPU) ────────────────────────────────────
     print("\nApplying INT8 static activation + weight quantization (torchao)…")
+    reset_gpu_state()
     bench(torch.compile(apply_int8(model, calib_dataloader=train_loader), mode="max-autotune-no-cudagraphs"),
           val_loader, DEVICE, "int8_torchao", "int8", skip_batches=2)
 
