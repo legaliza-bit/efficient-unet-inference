@@ -1,31 +1,52 @@
 import argparse
 import json
-import torch
-from torch.utils.data import DataLoader
-from loguru import logger
 
-from src.config import DEVICE, BATCH_SIZE, DATA_DIR, RESULTS_DIR, CACHE_PATH, BENCH_N_SAMPLES
-from src.utils import set_seed, print_results
-from src.benchmark import run_benchmark, BenchmarkResult
-from src.data import download_carvana, prepare_benchmark_cache, download_bench_cache, CachedDataset
+import torch
+from loguru import logger
+from torch.utils.data import DataLoader
+
+from src.benchmark import BenchmarkResult, run_benchmark
+from src.config import (BATCH_SIZE, BENCH_N_SAMPLES, CACHE_PATH, DATA_DIR,
+                        DEVICE, RESULTS_DIR)
+from src.data import (CachedDataset, download_bench_cache, download_carvana,
+                      prepare_benchmark_cache)
 from src.finetune.finetune import finetune, finetune_qat
-from src.model import load_model, apply_compiled, apply_fp8, apply_int8
+from src.model import apply_compiled, apply_fp8, apply_int8, load_model
+from src.utils import print_results, set_seed
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--finetune", action="store_true")
     parser.add_argument("--finetune-qat", action="store_true")
-    parser.add_argument("--download", action="store_true",
-                        help="Download Carvana from Kaggle (requires ~/.kaggle/kaggle.json)")
-    parser.add_argument("--trt", action="store_true",
-                        help="Include TensorRT experiments (requires tensorrt-cu12)")
-    parser.add_argument("--profile", action="store_true",
-                        help="Run torch.profiler on each experiment and save chrome traces to tmp/profiles/")
-    parser.add_argument("--batch-sizes", nargs="+", type=int, default=[BATCH_SIZE],
-                        metavar="BS", help="Batch sizes to sweep (e.g. --batch-sizes 1 4 8 16)")
-    parser.add_argument("--prepare-cache", action="store_true",
-                        help=f"Preprocess {BENCH_N_SAMPLES} samples from Carvana and save to tmp/bench_cache.pt")
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Download Carvana from Kaggle (requires ~/.kaggle/kaggle.json)",
+    )
+    parser.add_argument(
+        "--trt",
+        action="store_true",
+        help="Include TensorRT experiments (requires tensorrt-cu12)",
+    )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Run torch.profiler on each experiment and save chrome traces to tmp/profiles/",
+    )
+    parser.add_argument(
+        "--batch-sizes",
+        nargs="+",
+        type=int,
+        default=[BATCH_SIZE],
+        metavar="BS",
+        help="Batch sizes to sweep (e.g. --batch-sizes 1 4 8 16)",
+    )
+    parser.add_argument(
+        "--prepare-cache",
+        action="store_true",
+        help=f"Preprocess {BENCH_N_SAMPLES} samples from Carvana and save to tmp/bench_cache.pt",
+    )
     args = parser.parse_args()
 
     logger.info(f"Device: {DEVICE}")
@@ -51,7 +72,9 @@ def main():
             logger.info("\nQuantization Aware Finetuning")
             finetune_qat(model)
         prepare_benchmark_cache()
-        logger.info("Cache ready. Upload tmp/bench_cache.pt to Google Drive and set GDRIVE_FILE_ID in config.py")
+        logger.info(
+            "Cache ready. Upload tmp/bench_cache.pt to Google Drive and set GDRIVE_FILE_ID in config.py"
+        )
         return
 
     # ── Benchmark (only needs cache) ─────────────────────────────────────────
@@ -75,14 +98,17 @@ def main():
             raise ImportError(
                 "TensorRT is required for --trt. Install with: uv sync --extra trt"
             )
-        from src.config import (
-            ONNX_PATH, TRT_FP16_PATH, TRT_FP8_PATH, TRT_INT8_PATH, CALIB_PATH,
-        )
-        from src.trt import export_to_onnx, save_calib_data, build_trt_engine, TRTModel
+        from src.config import (CALIB_PATH, ONNX_PATH, TRT_FP8_PATH,
+                                TRT_FP16_PATH, TRT_INT8_PATH)
+        from src.trt import (TRTModel, build_trt_engine, export_to_onnx,
+                             save_calib_data)
 
         calib_loader = DataLoader(
-            dataset, batch_size=BATCH_SIZE, shuffle=False,
-            num_workers=4, pin_memory=(DEVICE.type == "cuda"),
+            dataset,
+            batch_size=BATCH_SIZE,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=(DEVICE.type == "cuda"),
         )
         sample, _ = next(iter(calib_loader))
         export_to_onnx(model, sample, ONNX_PATH)
@@ -105,25 +131,57 @@ def main():
         logger.info(f"Batch size: {bs}")
 
         dataloader = DataLoader(
-            dataset, batch_size=bs, shuffle=False,
-            num_workers=4, pin_memory=(DEVICE.type == "cuda"),
+            dataset,
+            batch_size=bs,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=(DEVICE.type == "cuda"),
             worker_init_fn=set_seed,
         )
-        run_benchmark(model, dataloader, DEVICE, f"fp32_baseline_bs{bs}", "fp32", args.profile)
+        run_benchmark(
+            model, dataloader, DEVICE, f"fp32_baseline_bs{bs}", "fp32", args.profile
+        )
 
-        run_benchmark(model, dataloader, DEVICE, f"fp16_baseline_bs{bs}", "fp16", args.profile)
+        run_benchmark(
+            model, dataloader, DEVICE, f"fp16_baseline_bs{bs}", "fp16", args.profile
+        )
 
-        run_benchmark(apply_compiled(model), dataloader, DEVICE, f"compile_fp16_bs{bs}", "fp16", args.profile)
+        run_benchmark(
+            apply_compiled(model),
+            dataloader,
+            DEVICE,
+            f"compile_fp16_bs{bs}",
+            "fp16",
+            args.profile,
+        )
 
         logger.info("\nApplying FP8 weight quantization (torchao)…")
-        run_benchmark(apply_fp8(model), dataloader, DEVICE, f"fp8_torchao_bs{bs}", "fp8", args.profile)
+        run_benchmark(
+            apply_fp8(model),
+            dataloader,
+            DEVICE,
+            f"fp8_torchao_bs{bs}",
+            "fp8",
+            args.profile,
+        )
 
-        run_benchmark(apply_int8(model), dataloader, DEVICE, f"int8_torchao_bs{bs}", "int8", args.profile)
+        run_benchmark(
+            apply_int8(model),
+            dataloader,
+            DEVICE,
+            f"int8_torchao_bs{bs}",
+            "int8",
+            args.profile,
+        )
 
         for exp_name, (precision, engine_path) in trt_models.items():
             run_benchmark(
-                TRTModel(engine_path, DEVICE), dataloader, DEVICE,
-                f"{exp_name}_bs{bs}", precision, args.profile
+                TRTModel(engine_path, DEVICE),
+                dataloader,
+                DEVICE,
+                f"{exp_name}_bs{bs}",
+                precision,
+                args.profile,
             )
 
     summary_path = RESULTS_DIR / "summary.json"

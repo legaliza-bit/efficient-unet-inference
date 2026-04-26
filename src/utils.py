@@ -1,10 +1,10 @@
 import gc
-import torch
-import numpy as np
 import random
-
-from loguru import logger
 from pathlib import Path
+
+import numpy as np
+import torch
+from loguru import logger
 
 
 def set_seed(worker_id):

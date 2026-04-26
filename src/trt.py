@@ -52,10 +52,14 @@ def build_trt_engine(
     engine_path.parent.mkdir(parents=True, exist_ok=True)
     script = Path(__file__).parent / "_trt_build.py"
     cmd = [
-        sys.executable, str(script),
-        "--onnx", str(onnx_path),
-        "--engine", str(engine_path),
-        "--workspace-gb", str(workspace_gb),
+        sys.executable,
+        str(script),
+        "--onnx",
+        str(onnx_path),
+        "--engine",
+        str(engine_path),
+        "--workspace-gb",
+        str(workspace_gb),
     ]
     if fp16:
         cmd.append("--fp16")
@@ -68,7 +72,7 @@ def build_trt_engine(
         raise RuntimeError(
             f"TRT engine build subprocess failed (exit {result.returncode})"
         )
-    size_mb = engine_path.stat().st_size / 1024 ** 2
+    size_mb = engine_path.stat().st_size / 1024**2
     print(f"TRT engine: {engine_path} ({size_mb:.1f} MB)")
 
 
@@ -80,9 +84,7 @@ class TRTModel:
 
         logger = trt.Logger(trt.Logger.WARNING)
         runtime = trt.Runtime(logger)
-        self.engine = runtime.deserialize_cuda_engine(
-            Path(engine_path).read_bytes()
-        )
+        self.engine = runtime.deserialize_cuda_engine(Path(engine_path).read_bytes())
         self.context = self.engine.create_execution_context()
         self._input_name = self.engine.get_tensor_name(0)
         self._output_name = self.engine.get_tensor_name(1)
@@ -96,9 +98,7 @@ class TRTModel:
         out = torch.empty(out_shape, dtype=torch.float32, device=self.device)
         self.context.set_tensor_address(self._input_name, x.data_ptr())
         self.context.set_tensor_address(self._output_name, out.data_ptr())
-        self.context.execute_async_v3(
-            torch.cuda.current_stream().cuda_stream
-        )
+        self.context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
         return out
 
     def eval(self):

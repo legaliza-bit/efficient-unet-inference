@@ -6,11 +6,9 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from src.config import (BATCH_SIZE, CKPT_PATH, DEVICE, FINETUNE_EPOCHS, LR,
+                        NUM_CLASSES, QAT_CKPT_PATH, QAT_EPOCHS)
 from src.data import get_carvana
-from src.config import (
-    BATCH_SIZE, FINETUNE_EPOCHS, QAT_EPOCHS, LR,
-    DEVICE, NUM_CLASSES, CKPT_PATH, QAT_CKPT_PATH,
-)
 from src.finetune.losses import CombinedLoss
 from src.metrics import mean_iou
 from src.utils import set_seed
@@ -21,13 +19,20 @@ def _make_loaders(num_workers=4):
     val_ds = get_carvana("val")
     g = torch.Generator().manual_seed(42)
     train_loader = DataLoader(
-        train_ds, batch_size=BATCH_SIZE, shuffle=True,
-        num_workers=num_workers, pin_memory=True,
-        worker_init_fn=set_seed, generator=g,
+        train_ds,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+        worker_init_fn=set_seed,
+        generator=g,
     )
     val_loader = DataLoader(
-        val_ds, batch_size=BATCH_SIZE, shuffle=False,
-        num_workers=num_workers, pin_memory=True,
+        val_ds,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
     )
     print(f"Train: {len(train_ds)} | Val: {len(val_ds)}")
     return train_loader, val_loader
@@ -80,9 +85,13 @@ def finetune(model, num_classes=NUM_CLASSES, save_path=CKPT_PATH):
     criterion = CombinedLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr=LR, epochs=FINETUNE_EPOCHS,
-        steps_per_epoch=len(train_loader), pct_start=0.1,
-        div_factor=10, final_div_factor=100,
+        optimizer,
+        max_lr=LR,
+        epochs=FINETUNE_EPOCHS,
+        steps_per_epoch=len(train_loader),
+        pct_start=0.1,
+        div_factor=10,
+        final_div_factor=100,
     )
     scaler = torch.amp.GradScaler() if DEVICE.type == "cuda" else None
 
@@ -92,7 +101,9 @@ def finetune(model, num_classes=NUM_CLASSES, save_path=CKPT_PATH):
         train_loss = _train_epoch(
             model, train_loader, criterion, optimizer, scheduler, scaler, DEVICE
         )
-        val_loss, val_iou = _val_epoch(model, val_loader, criterion, DEVICE, num_classes)
+        val_loss, val_iou = _val_epoch(
+            model, val_loader, criterion, DEVICE, num_classes
+        )
         print(
             f"Epoch {epoch:2d}: train_loss={train_loss:.4f} "
             f"| val_loss={val_loss:.4f} | mIoU={val_iou:.4f}"
@@ -106,8 +117,9 @@ def finetune(model, num_classes=NUM_CLASSES, save_path=CKPT_PATH):
 
 def finetune_qat(model, num_classes=NUM_CLASSES, save_path=QAT_CKPT_PATH):
     """Finetune with fake quantization nodes (QAT), convert to int8, save."""
-    from torch.ao.quantization.quantize_fx import prepare_qat_fx, convert_fx  # noqa: PLC0415
     from torch.ao.quantization import get_default_qat_qconfig_mapping
+    from torch.ao.quantization.quantize_fx import (convert_fx,  # noqa: PLC0415
+                                                   prepare_qat_fx)
 
     model = copy.deepcopy(model).cpu().train()
 
@@ -119,9 +131,7 @@ def finetune_qat(model, num_classes=NUM_CLASSES, save_path=QAT_CKPT_PATH):
     train_loader, val_loader = _make_loaders(num_workers=2)
 
     criterion = CombinedLoss()
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=LR / 10, weight_decay=1e-4
-    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LR / 10, weight_decay=1e-4)
 
     scaler = torch.amp.GradScaler() if DEVICE.type == "cuda" else None
     model.to(DEVICE)

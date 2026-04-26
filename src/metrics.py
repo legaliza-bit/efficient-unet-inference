@@ -21,7 +21,7 @@ def update_conf_matrix(conf_matrix, preds, targets, num_classes):
     mask = (targets >= 0) & (targets < num_classes) & (targets != 255)
     conf_matrix += torch.bincount(
         (num_classes * targets[mask] + preds[mask]).view(-1),
-        minlength=num_classes ** 2,
+        minlength=num_classes**2,
     ).reshape(num_classes, num_classes)
 
 

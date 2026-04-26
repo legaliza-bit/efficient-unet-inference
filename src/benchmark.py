@@ -1,17 +1,17 @@
 import json
 import time
-import torch
-from dataclasses import dataclass, asdict
-
-from torch.profiler import ProfilerActivity
-from loguru import logger
-import numpy as np
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from src.utils import reset_gpu_state, get_model_size_mb
-from src.metrics import update_conf_matrix, compute_miou_dice
+import numpy as np
+import torch
+from loguru import logger
+from torch.profiler import ProfilerActivity
+
 from src.config import NUM_CLASSES, PROFILE_DIR, RESULTS_DIR
+from src.metrics import compute_miou_dice, update_conf_matrix
 from src.model import forward, warmup_model
+from src.utils import get_model_size_mb, reset_gpu_state
 
 
 @dataclass
@@ -114,7 +114,9 @@ def run_benchmark(
 
     latencies = []
     total_samples = 0
-    conf_matrix = torch.zeros((NUM_CLASSES, NUM_CLASSES), dtype=torch.int64, device=device)
+    conf_matrix = torch.zeros(
+        (NUM_CLASSES, NUM_CLASSES), dtype=torch.int64, device=device
+    )
 
     if device.type == "cuda":
         start_event = torch.cuda.Event(enable_timing=True)
@@ -149,7 +151,8 @@ def run_benchmark(
     miou, mean_dice = compute_miou_dice(conf_matrix)
     peak_mem = (
         torch.cuda.max_memory_allocated(device) / 1024**2
-        if device.type == "cuda" else None
+        if device.type == "cuda"
+        else None
     )
 
     result = BenchmarkResult(

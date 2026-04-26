@@ -1,5 +1,6 @@
-import torch
 from pathlib import Path
+
+import torch
 
 COMPETITION = "carvana-image-masking-challenge"
 

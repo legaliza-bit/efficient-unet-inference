@@ -29,9 +29,7 @@ class _NumpyCalibrator(trt.IInt8EntropyCalibrator2):
     def get_batch(self, _names):
         if self._idx >= len(self._batches):
             return None
-        self._buf = (
-            torch.from_numpy(self._batches[self._idx]).cuda().contiguous()
-        )
+        self._buf = torch.from_numpy(self._batches[self._idx]).cuda().contiguous()
         self._idx += 1
         return [self._buf.data_ptr()]
 
@@ -70,9 +68,7 @@ def main():
     _, C, H, W = inp.shape
 
     config = builder.create_builder_config()
-    config.set_memory_pool_limit(
-        trt.MemoryPoolType.WORKSPACE, args.workspace_gb << 30
-    )
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, args.workspace_gb << 30)
 
     calib_batch = _NumpyCalibrator._BATCH if (args.int8 or args.fp8) else 8
     profile = builder.create_optimization_profile()

@@ -1,10 +1,13 @@
 import copy
+from typing import Callable
+
 import torch
 from loguru import logger
-from torchao.quantization import quantize_, Float8WeightOnlyConfig, Int8DynamicActivationInt8WeightConfig
+from torchao.quantization import (Float8WeightOnlyConfig,
+                                  Int8DynamicActivationInt8WeightConfig,
+                                  quantize_)
 
-from src.config import IMG_SCALE, CKPT_PATH
-from typing import Callable
+from src.config import CKPT_PATH, IMG_SCALE
 
 
 def load_model(pretrained=True):
