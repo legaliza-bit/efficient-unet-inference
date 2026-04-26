@@ -150,6 +150,15 @@ def main():
             apply_compiled(model),
             dataloader,
             DEVICE,
+            f"compile_fp32_bs{bs}",
+            "fp32",
+            args.profile,
+        )
+
+        run_benchmark(
+            apply_compiled(model),
+            dataloader,
+            DEVICE,
             f"compile_fp16_bs{bs}",
             "fp16",
             args.profile,
