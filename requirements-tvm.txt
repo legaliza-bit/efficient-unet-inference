@@ -6,4 +6,5 @@ onnxoptimizer
 pillow
 loguru
 xgboost<2.0
+tornado
 --extra-index-url https://download.pytorch.org/whl/cu121
