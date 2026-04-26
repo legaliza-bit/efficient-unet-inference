@@ -16,8 +16,8 @@ from src.config import DATA_DIR, IMG_SCALE, COMPETITION, IMGS_DIR, MASKS_DIR, CA
 def _train_augmentations() -> v2.Compose:
     return v2.Compose([
         v2.RandomHorizontalFlip(p=0.5),
-        v2.RandomRotation(degrees=10),
-        v2.RandomPerspective(distortion_scale=0.2, p=0.3),
+        # v2.RandomRotation(degrees=10),
+        # v2.RandomPerspective(distortion_scale=0.2, p=0.3),
         v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
         v2.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
         v2.RandomAdjustSharpness(sharpness_factor=2, p=0.3),

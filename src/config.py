@@ -17,7 +17,7 @@ TRT_FP8_PATH = TMP_DIR / "unet_carvana_fp8.engine"
 TRT_INT8_PATH = TMP_DIR / "unet_carvana_int8.engine"
 CALIB_PATH = TMP_DIR / "calib_data.npy"
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:1")
 PROFILE_DIR = TMP_DIR / "profiles"
 RESULTS_DIR = TMP_DIR / "results"
 CACHE_PATH = TMP_DIR / "bench_cache.pt"
