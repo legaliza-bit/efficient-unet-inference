@@ -29,6 +29,9 @@ def main():
     )
     args = parser.parse_args()
 
+    if torch.cuda.is_available():
+        torch.cuda.set_device(DEVICE)
+
     if not CACHE_PATH.exists():
         download_bench_cache()
     dataset = CachedDataset(CACHE_PATH)

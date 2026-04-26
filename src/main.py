@@ -51,6 +51,7 @@ def main():
 
     logger.info(f"Device: {DEVICE}")
     if torch.cuda.is_available():
+        torch.cuda.set_device(DEVICE)
         for i in range(torch.cuda.device_count()):
             logger.info(f"GPU {i}: {torch.cuda.get_device_name(i)}")
 
