@@ -172,7 +172,6 @@ def main():
             dataset,
             batch_size=bs,
             shuffle=False,
-            drop_last=True,
             num_workers=4,
             pin_memory=(DEVICE.type == "cuda"),
             worker_init_fn=set_seed,
