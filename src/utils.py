@@ -23,20 +23,20 @@ def get_model_size_mb(model) -> float:
 
 def print_results(results):
     header = (
-        f"{'Experiment':<22} {'Prec':<6} {'Dev':<5} "
-        f"{'Lat(ms)':<10} {'p95(ms)':<9} {'Tput(img/s)':<13} "
-        f"{'mIoU':<8} {'Dice':<8} {'GPU mem(MB)':<13} {'Size(MB)'}"
+        f"{'Experiment':<26} {'Prec':<6} "
+        f"{'Lat(mean)':<10} {'Lat(p50)':<9} {'Lat(p95)':<9} {'Lat(p99)':<9} "
+        f"{'Tput(img/s)':<13} {'mIoU':<8} {'Dice':<8} {'GPU mem(MB)'}"
     )
     print("\n" + header)
     print("─" * len(header))
     for r in results:
         gpu_mem = f"{r.peak_gpu_memory_MB:.0f}" if r.peak_gpu_memory_MB else "n/a"
-        dev = r.device.split(":")[0]
         print(
-            f"{r.pipeline_name:<22} {r.precision:<6} {dev:<5} "
-            f"{r.latency_mean_ms:<10.1f} {r.latency_p95_ms:<9.1f} "
+            f"{r.pipeline_name:<26} {r.precision:<6} "
+            f"{r.latency_mean_ms:<10.1f} {r.latency_p50_ms:<9.1f} "
+            f"{r.latency_p95_ms:<9.1f} {r.latency_p99_ms:<9.1f} "
             f"{r.throughput_samples_per_sec:<13.1f} "
-            f"{r.miou:<8.4f} {r.dice:<8.4f} {gpu_mem:<13} {r.model_size_MB:.1f}"
+            f"{r.miou:<8.4f} {r.dice:<8.4f} {gpu_mem}"
         )
 
 
