@@ -89,7 +89,7 @@ uv run python -m src.main --profile
 ### torch.compile (max-autotune)
 - `torch.compile(model, mode="max-autotune-no-cudagraphs")`
 - CUDA Graphs отключены для избежания OOM от private memory pool.
-- Используется `drop_last=True` в DataLoader, чтобы избежать дорогостоящей рекомпиляции графа на неполном последнем батче.
+- Для максимальной скорости инференса нужно использовать только один размер батча. Стоит использовать `drop_last=True` в DataLoader, чтобы избежать дорогостоящей рекомпиляции графа на неполном последнем батче.
 
 ### torchao FP8 / INT8
 - **FP8**: `Float8WeightOnlyConfig` — weight-only квантизация.
