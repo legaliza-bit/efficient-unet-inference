@@ -65,31 +65,36 @@ def main():
 
 
 def _plot(batch_sizes, throughputs, lat_batch, gpu_mems):
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
     fig.suptitle("FP32 Baseline — Batch Size Study", fontsize=14, fontweight="bold")
 
     kw = dict(marker="o", linewidth=2, markersize=7)
     color = sns.color_palette("muted")
 
     # Throughput
-    axes[0].plot(batch_sizes, throughputs, color=color[0], **kw)
-    axes[0].set_title("Throughput")
-    axes[0].set_xlabel("Batch size")
-    axes[0].set_ylabel("img/s")
+    axes[0, 0].plot(batch_sizes, throughputs, color=color[0], **kw)
+    axes[0, 0].set_title("Throughput")
+    axes[0, 0].set_xlabel("Batch size")
+    axes[0, 0].set_ylabel("img/s")
+
+    # Peak GPU memory
+    axes[0, 1].plot(batch_sizes, gpu_mems, color=color[1], **kw)
+    axes[0, 1].set_title("Peak GPU Memory")
+    axes[0, 1].set_xlabel("Batch size")
+    axes[0, 1].set_ylabel("MB")
 
     # Latency per batch
-    axes[1].plot(batch_sizes, lat_batch, color=color[1], **kw)
-    axes[1].set_title("Latency per Batch")
-    axes[1].set_xlabel("Batch size")
-    axes[1].set_ylabel("ms")
+    axes[1, 0].plot(batch_sizes, lat_batch, color=color[3], **kw)
+    axes[1, 0].set_title("Latency per Batch")
+    axes[1, 0].set_xlabel("Batch size")
+    axes[1, 0].set_ylabel("ms")
 
     # Pareto front: throughput vs GPU memory
-    ax = axes[2]
+    ax = axes[1, 1]
     ax.scatter(gpu_mems, throughputs, color=color[2], s=80, zorder=5)
     for bs, x, y in zip(batch_sizes, gpu_mems, throughputs):
         ax.annotate(f"bs={bs}", (x, y), textcoords="offset points",
                     xytext=(6, 4), fontsize=9)
-    # draw Pareto frontier
     pareto = _pareto_front(gpu_mems, throughputs)
     px, py = zip(*pareto)
     ax.plot(px, py, linestyle="--", color=color[2], linewidth=1.5, alpha=0.6, label="Pareto front")
@@ -98,9 +103,10 @@ def _plot(batch_sizes, throughputs, lat_batch, gpu_mems):
     ax.set_ylabel("Throughput (img/s)")
     ax.legend()
 
-    for ax in axes:
-        ax.set_xticks(batch_sizes if ax != axes[2] else ax.get_xticks())
+    for ax in axes.flat[:3]:
+        ax.set_xticks(batch_sizes)
         ax.grid(True, alpha=0.3)
+    axes[1, 1].grid(True, alpha=0.3)
 
     plt.tight_layout()
     out = RESULTS_DIR / "batch_size_study.png"
