@@ -45,10 +45,11 @@ git clone --recursive https://github.com/apache/tvm.git tvm-src --depth 1 --bran
 cd tvm-src && mkdir -p build && cp cmake/config.cmake build/
 cd build
 
-# Edit config.cmake for GPU support
+# Edit config.cmake for GPU support and LLVM
 sed -i 's/USE_CUDA=OFF/USE_CUDA=ON/' config.cmake
 sed -i 's/USE_CUDNN=OFF/USE_CUDNN=ON/' config.cmake
 sed -i 's/USE_CUBLAS=OFF/USE_CUBLAS=ON/' config.cmake
+# It is critical to use the exact path to llvm-config, NOT just "ON"
 sed -i "s|USE_LLVM=OFF|USE_LLVM=$(pwd)/../../clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04/bin/llvm-config|" config.cmake
 
 # (Optional) If system only provides versioned linker names:

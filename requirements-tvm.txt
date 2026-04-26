@@ -8,4 +8,8 @@ loguru
 xgboost<2.0
 cloudpickle
 tornado
+decorator
+scipy
+attrs
+psutil
 --extra-index-url https://download.pytorch.org/whl/cu121
