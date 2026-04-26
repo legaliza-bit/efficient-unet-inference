@@ -28,15 +28,6 @@ def main():
                         help=f"Preprocess {BENCH_N_SAMPLES} samples from Carvana and save to tmp/bench_cache.pt")
     args = parser.parse_args()
 
-    if (DATA_DIR / "train").exists():
-        logger.info(f"Found existing dataset at {DATA_DIR}")
-    elif args.download:
-        download_carvana()
-    else:
-        raise FileNotFoundError(
-            f"No dataset at {DATA_DIR}. Run with --download to fetch from Kaggle."
-        )
-
     logger.info(f"Device: {DEVICE}")
     if torch.cuda.is_available():
         for i in range(torch.cuda.device_count()):
@@ -44,20 +35,26 @@ def main():
 
     model = load_model()
 
-    if args.finetune:
-        logger.info("\nFinetuning")
-        finetune(model)
-        model = load_model()
-
-    if args.finetune_qat:
-        logger.info("\nQuantization Aware Finetuning")
-        finetune_qat(model)
-
+    # ── Prepare cache (needs raw Carvana data) ───────────────────────────────
     if args.prepare_cache:
+        if args.download:
+            download_carvana()
+        elif not (DATA_DIR / "train").exists():
+            raise FileNotFoundError(
+                f"No dataset at {DATA_DIR}. Run with --prepare-cache --download to fetch from Kaggle and prepare cache."
+            )
+        if args.finetune:
+            logger.info("\nFinetuning")
+            finetune(model)
+            model = load_model()
+        if args.finetune_qat:
+            logger.info("\nQuantization Aware Finetuning")
+            finetune_qat(model)
         prepare_benchmark_cache()
         logger.info("Cache ready. Upload tmp/bench_cache.pt to Google Drive and set GDRIVE_FILE_ID in config.py")
         return
 
+    # ── Benchmark (only needs cache) ─────────────────────────────────────────
     if CACHE_PATH.exists():
         logger.info(f"Loading benchmark cache from {CACHE_PATH}")
         dataset = CachedDataset(CACHE_PATH)
