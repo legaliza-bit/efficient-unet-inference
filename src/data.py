@@ -10,7 +10,7 @@ from torchvision.transforms import v2
 from torchvision import tv_tensors
 from loguru import logger
 
-from src.config import DATA_DIR, IMG_SCALE, COMPETITION, IMGS_DIR, MASKS_DIR
+from src.config import DATA_DIR, IMG_SCALE, COMPETITION, IMGS_DIR, MASKS_DIR, CACHE_PATH, GDRIVE_FILE_ID, BENCH_N_SAMPLES
 
 
 def _train_augmentations() -> v2.Compose:
@@ -120,6 +120,57 @@ def get_carvana(split: str = "train", val_fraction: float = 0.1, scale: float = 
     if split == "train":
         return AugmentedSubset(train_ds, _train_augmentations())
     return val_ds
+
+
+class CachedDataset(Dataset):
+    def __init__(self, cache_path: Path = CACHE_PATH):
+        data = torch.load(cache_path, map_location="cpu", weights_only=True)
+        self.imgs = data["imgs"]    # float16
+        self.masks = data["masks"]  # uint8
+
+    def __len__(self):
+        return len(self.imgs)
+
+    def __getitem__(self, idx):
+        return self.imgs[idx].float(), self.masks[idx].long()
+
+
+def prepare_benchmark_cache(
+    cache_path: Path = CACHE_PATH,
+    n_samples: int = BENCH_N_SAMPLES,
+) -> None:
+    """Preprocess n_samples from Carvana once, save to cache_path for reproducible benchmarking."""
+    ds = CarvanaDataset(IMGS_DIR, MASKS_DIR, scale=IMG_SCALE)
+    indices = torch.randperm(len(ds), generator=torch.Generator().manual_seed(42))[:n_samples].tolist()
+
+    imgs, masks = [], []
+    for i, idx in enumerate(indices):
+        img, mask = ds[idx]
+        imgs.append(img)
+        masks.append(mask)
+        if (i + 1) % 50 == 0:
+            logger.info(f"Prepared {i + 1}/{n_samples} samples...")
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {"imgs": torch.stack(imgs).half(), "masks": torch.stack(masks).to(torch.uint8)},
+        cache_path,
+    )
+    size_mb = cache_path.stat().st_size / 1024**2
+    logger.info(f"Saved {n_samples} samples ({size_mb:.0f} MB) → {cache_path}")
+
+
+def download_bench_cache(cache_path: Path = CACHE_PATH) -> None:
+    """Download benchmark cache from Google Drive (set GDRIVE_FILE_ID in config.py)."""
+    if not GDRIVE_FILE_ID:
+        raise ValueError("GDRIVE_FILE_ID is not set in config.py")
+    try:
+        import gdown
+    except ImportError:
+        raise ImportError("gdown is required: uv sync")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("Downloading benchmark cache from Google Drive...")
+    gdown.download(id=GDRIVE_FILE_ID, output=str(cache_path), quiet=False)
 
 
 def download_carvana() -> None:

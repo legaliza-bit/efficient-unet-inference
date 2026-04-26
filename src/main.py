@@ -4,10 +4,10 @@ import torch
 from torch.utils.data import DataLoader
 from loguru import logger
 
-from src.config import DEVICE, BATCH_SIZE, DATA_DIR, RESULTS_DIR
+from src.config import DEVICE, BATCH_SIZE, DATA_DIR, RESULTS_DIR, CACHE_PATH, BENCH_N_SAMPLES
 from src.utils import set_seed, print_results
 from src.benchmark import run_benchmark, BenchmarkResult
-from src.data import download_carvana, get_carvana
+from src.data import download_carvana, prepare_benchmark_cache, download_bench_cache, CachedDataset
 from src.finetune.finetune import finetune, finetune_qat
 from src.model import load_model, apply_compiled, apply_fp8, apply_int8
 
@@ -24,6 +24,8 @@ def main():
                         help="Run torch.profiler on each experiment and save chrome traces to tmp/profiles/")
     parser.add_argument("--batch-sizes", nargs="+", type=int, default=[BATCH_SIZE],
                         metavar="BS", help="Batch sizes to sweep (e.g. --batch-sizes 1 4 8 16)")
+    parser.add_argument("--prepare-cache", action="store_true",
+                        help=f"Preprocess {BENCH_N_SAMPLES} samples from Carvana and save to tmp/bench_cache.pt")
     args = parser.parse_args()
 
     if (DATA_DIR / "train").exists():
@@ -51,7 +53,18 @@ def main():
         logger.info("\nQuantization Aware Finetuning")
         finetune_qat(model)
 
-    dataset = get_carvana("train")
+    if args.prepare_cache:
+        prepare_benchmark_cache()
+        logger.info("Cache ready. Upload tmp/bench_cache.pt to Google Drive and set GDRIVE_FILE_ID in config.py")
+        return
+
+    if CACHE_PATH.exists():
+        logger.info(f"Loading benchmark cache from {CACHE_PATH}")
+        dataset = CachedDataset(CACHE_PATH)
+    else:
+        logger.info("No cache found, attempting download from Google Drive...")
+        download_bench_cache()
+        dataset = CachedDataset(CACHE_PATH)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     (RESULTS_DIR / "summary.json").write_text("[]")

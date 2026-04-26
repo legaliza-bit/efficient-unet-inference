@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "gdown>=5.1.0",
     "kaggle>=2.0.0",
     "loguru>=0.7.3",
     "numpy>=2.4.4",

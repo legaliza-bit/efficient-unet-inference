@@ -20,9 +20,13 @@ CALIB_PATH = TMP_DIR / "calib_data.npy"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 PROFILE_DIR = TMP_DIR / "profiles"
 RESULTS_DIR = TMP_DIR / "results"
+CACHE_PATH = TMP_DIR / "bench_cache.pt"
+GDRIVE_FILE_ID = ""  # set after uploading bench_cache.pt to Google Drive
+
 IMG_SCALE = 0.5
 BATCH_SIZE = 8
 NUM_CLASSES = 2
+BENCH_N_SAMPLES = 500
 
 FINETUNE_EPOCHS = 30
 QAT_EPOCHS = 5
