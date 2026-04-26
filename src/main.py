@@ -11,7 +11,7 @@ from src.config import (BATCH_SIZE, BENCH_N_SAMPLES, CACHE_PATH, DATA_DIR,
 from src.data import (CachedDataset, download_bench_cache, download_carvana,
                       prepare_benchmark_cache)
 from src.finetune.finetune import finetune, finetune_qat
-from src.model import apply_compiled, apply_fp8, apply_int8, load_model
+from src.model import apply_compiled, apply_fp8, apply_int8, apply_pruning, apply_sparse_2_4, load_model
 from src.utils import print_results, set_seed
 
 
@@ -183,6 +183,27 @@ def main():
             "int8",
             args.profile,
         )
+
+        # ── 2:4 structured sparsity ──────────────────────────────────────────
+        run_benchmark(
+            apply_sparse_2_4(model),
+            dataloader,
+            DEVICE,
+            f"sparse_2_4_bs{bs}",
+            "fp32",
+            args.profile,
+        )
+
+        # ── Unstructured magnitude pruning ───────────────────────────────────
+        for sparsity in [0.3, 0.5, 0.7]:
+            run_benchmark(
+                apply_pruning(model, sparsity),
+                dataloader,
+                DEVICE,
+                f"pruning_{int(sparsity * 100)}pct_bs{bs}",
+                "fp32",
+                args.profile,
+            )
 
         for exp_name, (precision, engine_path) in trt_models.items():
             run_benchmark(

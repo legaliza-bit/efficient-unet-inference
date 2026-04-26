@@ -58,6 +58,32 @@ def forward(model, x: torch.Tensor, precision: str) -> torch.Tensor:
     return model(x)
 
 
+def apply_pruning(model, sparsity: float = 0.5):
+    """Global unstructured magnitude pruning across all Conv2d weights."""
+    from torch.nn.utils import prune
+    model = copy.deepcopy(model).cuda().eval()
+    params = [(m, "weight") for m in model.modules() if isinstance(m, torch.nn.Conv2d)]
+    prune.global_unstructured(params, pruning_method=prune.L1Unstructured, amount=sparsity)
+    for m, _ in params:
+        prune.remove(m, "weight")
+    return model
+
+
+def apply_sparse_2_4(model):
+    """Apply 2:4 structured sparsity mask to all Conv2d weights (no runtime speedup — Conv2d not supported by cuSPARSELt)."""
+    model = copy.deepcopy(model).cuda().eval()
+    for m in model.modules():
+        if isinstance(m, torch.nn.Conv2d):
+            with torch.no_grad():
+                w = m.weight.data
+                shape = w.shape
+                w_flat = w.view(-1, 4)
+                mask = torch.zeros_like(w_flat)
+                mask.scatter_(1, w_flat.abs().topk(2, dim=1).indices, 1)
+                m.weight.copy_((w_flat * mask).view(shape))
+    return model
+
+
 def apply_compiled(model):
     """torch.compile with max-autotune (no CUDA graphs to avoid private pool OOM)."""
     return torch.compile(model, mode="max-autotune-no-cudagraphs")
