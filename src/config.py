@@ -21,7 +21,7 @@ DEVICE = torch.device("cuda:1")
 PROFILE_DIR = TMP_DIR / "profiles"
 RESULTS_DIR = TMP_DIR / "results"
 CACHE_PATH = TMP_DIR / "bench_cache.pt"
-GDRIVE_FILE_ID = ""  # set after uploading bench_cache.pt to Google Drive
+GDRIVE_FILE_ID = "1lNE7nALPutfB4StfAdQcsqxGvkzJ0g0Y"
 
 IMG_SCALE = 0.5
 BATCH_SIZE = 8
