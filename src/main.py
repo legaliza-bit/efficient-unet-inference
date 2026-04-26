@@ -242,37 +242,43 @@ def main():
             from src.tvm import run_tvm_benchmark
             
             logger.info("\n── TVM FP16 ──")
-            tvm_fp16_results = run_tvm_benchmark(
-                onnx_path=ONNX_PATH,
-                cache_path=CACHE_PATH,
-                precision="fp16",
-                batch_size=bs,
-                num_workers=4,
-                max_batches=0, # run all batches from the cache
-                tune=args.tvm_tune,
-                tune_trials=args.tvm_tune_trials,
-            )
-            tvm_fp16_results["pipeline_name"] = f"tvm_fp16_bs{bs}"
-            summary_path = RESULTS_DIR / "summary.json"
-            existing = json.loads(summary_path.read_text()) if summary_path.exists() else []
-            existing.append(tvm_fp16_results)
-            summary_path.write_text(json.dumps(existing, indent=2))
+            try:
+                tvm_fp16_results = run_tvm_benchmark(
+                    onnx_path=ONNX_PATH,
+                    cache_path=CACHE_PATH,
+                    precision="fp16",
+                    batch_size=bs,
+                    num_workers=4,
+                    max_batches=0, # run all batches from the cache
+                    tune=args.tvm_tune,
+                    tune_trials=args.tvm_tune_trials,
+                )
+                tvm_fp16_results["pipeline_name"] = f"tvm_fp16_bs{bs}"
+                summary_path = RESULTS_DIR / "summary.json"
+                existing = json.loads(summary_path.read_text()) if summary_path.exists() else []
+                existing.append(tvm_fp16_results)
+                summary_path.write_text(json.dumps(existing, indent=2))
+            except Exception as e:
+                logger.error(f"TVM FP16 benchmark failed: {e}")
 
             logger.info("\n── TVM FP32 ──")
-            tvm_fp32_results = run_tvm_benchmark(
-                onnx_path=ONNX_PATH,
-                cache_path=CACHE_PATH,
-                precision="fp32",
-                batch_size=bs,
-                num_workers=4,
-                max_batches=0, # run all batches from the cache
-                tune=args.tvm_tune,
-                tune_trials=args.tvm_tune_trials,
-            )
-            tvm_fp32_results["pipeline_name"] = f"tvm_fp32_bs{bs}"
-            existing = json.loads(summary_path.read_text()) if summary_path.exists() else []
-            existing.append(tvm_fp32_results)
-            summary_path.write_text(json.dumps(existing, indent=2))
+            try:
+                tvm_fp32_results = run_tvm_benchmark(
+                    onnx_path=ONNX_PATH,
+                    cache_path=CACHE_PATH,
+                    precision="fp32",
+                    batch_size=bs,
+                    num_workers=4,
+                    max_batches=0, # run all batches from the cache
+                    tune=args.tvm_tune,
+                    tune_trials=args.tvm_tune_trials,
+                )
+                tvm_fp32_results["pipeline_name"] = f"tvm_fp32_bs{bs}"
+                existing = json.loads(summary_path.read_text()) if summary_path.exists() else []
+                existing.append(tvm_fp32_results)
+                summary_path.write_text(json.dumps(existing, indent=2))
+            except Exception as e:
+                logger.error(f"TVM FP32 benchmark failed: {e}")
 
     summary_path = RESULTS_DIR / "summary.json"
     results = [BenchmarkResult(**d) for d in json.loads(summary_path.read_text())]
