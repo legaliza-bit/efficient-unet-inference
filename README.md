@@ -6,12 +6,21 @@
 
 | # | Пайплайн | Описание |
 |---|----------|----------|
-| 1 | **PyTorch FP32/FP16 baseline** | Бейзлайновый запуск без оптимизаций |
-| 2 | **PyTorch torch.compile** | Графовая компиляция (max-autotune) |
-| 3 | **torchao FP8/INT8** | Weight-only FP8 квантизация и статическая INT8 квантизация |
-| 4 | **TVM (Relay/LLVM)** | Альтернативный компилятор с AutoTVM-тюнингом |
-| 5 | **TensorRT** | NVIDIA TensorRT FP16/INT8/FP8 (опционально) |
-| 6 | **Спарсификация** | Magnitude pruning (30%, 50%, 70%) и 2:4 semi-structured |
+| Пайплайн | Precision | Latency (ms) | Throughput (fps) | mIoU | Dice | Комментарий |
+|----------|-----------|--------------|------------------|------|------|-------------|
+| **trt_int8** | INT8 | **8.2** | **978.2** | 0.9230 | 0.9595 | TensorRT (Static INT8) |
+| **trt_fp16** | FP16 | 15.3 | 523.2 | 0.9286 | 0.9625 | TensorRT (FP16) |
+| **trt_fp8** | FP8 | 15.3 | 521.7 | 0.9286 | 0.9625 | TensorRT (FP8) |
+| **compile_fp16** | FP16 | 18.0 | 443.7 | 0.9289 | 0.9627 | `torch.compile` (max-autotune) |
+| **compile_fp32** | FP32 | 34.9 | 229.1 | 0.9289 | 0.9627 | `torch.compile` (max-autotune) |
+| **tvm_fp16** | FP16 | 36.4 | 220.1 | 0.9285 | 0.9625 | Apache TVM |
+| **fp8_torchao** | FP8 | 39.4 | 202.8 | 0.9289 | 0.9627 | torchao (Weight-only) |
+| **int8_torchao** | INT8 | 39.5 | 202.7 | 0.9289 | 0.9627 | torchao (Static Act+Weight) |
+| **fp16_baseline** | FP16 | 39.5 | 201.9 | 0.9289 | 0.9627 | PyTorch Baseline (AMP) |
+| **tvm_fp32** | FP32 | 57.5 | 139.2 | 0.9289 | 0.9627 | Apache TVM |
+| **fp32_baseline** | FP32 | 64.0 | 124.8 | 0.9289 | 0.9627 | PyTorch Baseline (No AMP) |
+| **pruning_30pct** | FP32 | 64.1 | 124.6 | 0.9297 | 0.9632 | Magnitude pruning 30% |
+| **sparse_2_4** | FP32 | 63.9 | 125.2 | 0.2645 | 0.4142 | 2:4 Semi-structured |
 
 ---
 
