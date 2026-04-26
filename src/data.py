@@ -139,8 +139,13 @@ def prepare_benchmark_cache(
     cache_path: Path = CACHE_PATH,
     n_samples: int = BENCH_N_SAMPLES,
 ) -> None:
-    """Preprocess n_samples from Carvana once, save to cache_path for reproducible benchmarking."""
-    ds = CarvanaDataset(IMGS_DIR, MASKS_DIR, scale=IMG_SCALE)
+    """Apply augmentations to n_samples once and save to cache_path for reproducible benchmarking."""
+    import random
+    torch.manual_seed(42)
+    random.seed(42)
+    np.random.seed(42)
+
+    ds = get_carvana("train")
     indices = torch.randperm(len(ds), generator=torch.Generator().manual_seed(42))[:n_samples].tolist()
 
     imgs, masks = [], []
