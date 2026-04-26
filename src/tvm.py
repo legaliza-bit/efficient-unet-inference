@@ -25,7 +25,7 @@ _LLVM_DIR = _PROJECT_ROOT / "tmp" / "clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-2
 _LOCAL_LIB = _PROJECT_ROOT / "tmp" / "local-lib"
 
 _TVM_ENV = {
-    "PYTHONPATH": f"{_TVM_SRC / 'python'}:{_LLVM_DIR / 'lib' / 'python3.11' / 'site-packages'}",
+    "PYTHONPATH": f"{_TVM_SRC / 'python'}",
     "LD_LIBRARY_PATH": (
         f"{_TVM_SRC / 'build'}:{_LLVM_DIR / 'lib'}:{_LOCAL_LIB}"
         f":/usr/lib/x86_64-linux-gnu"
@@ -53,6 +53,18 @@ def run_tvm_benchmark(
 
     Returns a dict with benchmark results matching BenchmarkResult fields.
     """
+    # Pre-flight validation
+    if not _TVM_VENV_PYTHON.exists():
+        raise FileNotFoundError(
+            f"TVM venv Python not found at {_TVM_VENV_PYTHON}. "
+            f"Create the TVM venv following TVM_SETUP.md."
+        )
+    if not (_TVM_SRC / "python").exists():
+        raise FileNotFoundError(
+            f"TVM source build not found at {_TVM_SRC}. "
+            f"Build TVM from source following TVM_SETUP.md."
+        )
+
     output_dir = TMP_DIR / "tvm_results"
 
     cmd = [

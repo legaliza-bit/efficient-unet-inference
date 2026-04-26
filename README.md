@@ -27,6 +27,12 @@
 
 ## Быстрый старт
 
+### Предварительные требования
+
+- [uv](https://docs.astral.sh/uv/) должен быть установлен
+- NVIDIA GPU с драйвером, совместимым с CUDA 12.8
+- SM 80+ для INT8 квантизации, SM 89+ для FP8 квантизации
+
 ### 1. Установка зависимостей
 
 ```bash
@@ -128,6 +134,11 @@ kaggle competitions list
 ---
 
 ## Запуск TVM (Alternative Compiler)
+
+> ⚠️ **TVM must be built from source before running benchmarks.**
+> Pre-built PyPI wheels are CPU-only and will not work with GPU.
+> Follow the step-by-step instructions in [TVM_SETUP.md](TVM_SETUP.md) to build TVM with CUDA support.
+> The build requires cmake, CUDA toolkit, cuDNN, and takes ~30 minutes.
 
 В проекте используется Apache TVM для генерации эффективных CUDA-ядер. Ввиду требования TVM к Python 3.11, он запускается как отдельный процесс из-под виртуального окружения `.venv-tvm311`.
 

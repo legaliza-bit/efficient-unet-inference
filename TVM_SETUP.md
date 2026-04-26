@@ -1,5 +1,18 @@
 # TVM (Apache TVM) Integration
 
+## System Prerequisites
+
+Before building TVM, ensure your system has the following installed:
+
+- cmake >= 3.10
+- make
+- g++ (C++17 support)
+- CUDA Toolkit (compatible with your NVIDIA driver)
+- cuDNN development headers
+- cuBLAS development headers
+- ~10 GB free disk space (for TVM build + LLVM download)
+- Python 3.11
+
 ## Overview
 
 This project includes Apache TVM as an alternative compiler backend for UNet inference optimization (point 3 of the project requirements). Since TVM requires Python ≤3.11 while the main project uses Python 3.13, the TVM benchmark runs as a subprocess under a separate Python 3.11 virtual environment.
@@ -98,7 +111,7 @@ uv python install 3.11
 uv venv .venv-tvm311 --python 3.11
 
 # Install dependencies
-.venv-tvm311/bin/pip install "numpy<2" onnx onnxoptimizer pillow loguru
+.venv-tvm311/bin/pip install -r requirements-tvm.txt
 .venv-tvm311/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
 # Download LLVM 17.0.6
@@ -109,6 +122,8 @@ url = 'https://github.com/llvm/llvm-project/releases/download/llvmorg-17.0.6/cla
 urllib.request.urlretrieve(url, 'llvm.tar.xz')
 "
 tar xf llvm.tar.xz
+
+> ⚠️ The LLVM binary URL above is for x86_64 Linux (Ubuntu 22.04). Users on other platforms must download the appropriate LLVM 17.0.6 release from https://github.com/llvm/llvm-project/releases/tag/llvmorg-17.0.6
 
 # Clone and build TVM
 git clone --recursive https://github.com/apache/tvm.git tvm-src --depth 1 --branch v0.12.0
@@ -127,8 +142,15 @@ ln -sf /usr/lib/x86_64-linux-gnu/libzstd.so.1 ../../local-lib/libzstd.so
 ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 ../../local-lib/libtinfo.so
 ln -sf /usr/lib/x86_64-linux-gnu/libxml2.so.2 ../../local-lib/libxml2.so
 
-cmake -DCMAKE_SHARED_LINKER_FLAGS="-L$(pwd)/../../local-lib" .. && make -j$(nproc)
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_SHARED_LINKER_FLAGS="-L$(pwd)/../../local-lib" .. && make -j$(nproc)
+
+# Return to project root (subsequent commands assume being in the project root)
+cd ../..
 ```
+
+## ONNX Model
+
+The file `tmp/unet_carvana.onnx` is auto-generated when you run the benchmark with `--tvm` or `--trt`. No manual step is needed.
 
 ## Usage
 
@@ -144,7 +166,7 @@ uv run python -m src.main --tvm --tvm-tune
 
 ### Direct TVM benchmark (debugging)
 ```bash
-export PYTHONPATH=tmp/tvm-src/python:$PYTHONPATH
+export PYTHONPATH=tmp/tvm-src/python:tmp/clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04/lib/python3.11/site-packages:$PYTHONPATH
 export LD_LIBRARY_PATH=tmp/tvm-src/build:tmp/clang+llvm-17.0.6-x86_64-linux-gnu-ubuntu-22.04/lib:tmp/local-lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 export CUDA_VISIBLE_DEVICES=0
 

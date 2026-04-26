@@ -7,7 +7,7 @@ uses Python 3.13.
 
 Usage:
     python src/_tvm_benchmark.py \
-        --onnx-path tmp/unet_carvana.oapple \
+        --onnx-path tmp/unet_carvana.onnx \
         --precision fp16 \
         --output-dir tmp/tvm_results \
         --batch-size 8 \
