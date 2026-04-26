@@ -1,0 +1,1050 @@
+diff --git a/src/config.py b/src/config.py
+index 561d1ea..06ca17e 100644
+--- a/src/config.py
++++ b/src/config.py
+@@ -1,23 +1,33 @@
+-import torch
+ from pathlib import Path
+ 
++import torch
++
++COMPETITION = "carvana-image-masking-challenge"
++
+ PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ TMP_DIR = PROJECT_ROOT / "tmp"
+ DATA_DIR = PROJECT_ROOT / "data"
++IMGS_DIR = DATA_DIR / "train"
++MASKS_DIR = DATA_DIR / "train_masks"
++
+ CKPT_PATH = TMP_DIR / "unet_carvana.pt"
+ QAT_CKPT_PATH = TMP_DIR / "unet_carvana_qat.pt"
+ ONNX_PATH = TMP_DIR / "unet_carvana.onnx"
+ TRT_FP16_PATH = TMP_DIR / "unet_carvana_fp16.engine"
++TRT_FP8_PATH = TMP_DIR / "unet_carvana_fp8.engine"
+ TRT_INT8_PATH = TMP_DIR / "unet_carvana_int8.engine"
+ CALIB_PATH = TMP_DIR / "calib_data.npy"
+-TVM_RESULTS_DIR = TMP_DIR / "tvm_results"
+ 
+-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
++DEVICE = torch.device("cuda:0")
+ PROFILE_DIR = TMP_DIR / "profiles"
++RESULTS_DIR = TMP_DIR / "results"
++CACHE_PATH = TMP_DIR / "bench_cache.pt"
++GDRIVE_FILE_ID = "1lNE7nALPutfB4StfAdQcsqxGvkzJ0g0Y"
++
+ IMG_SCALE = 0.5
+ BATCH_SIZE = 8
+ NUM_CLASSES = 2
+-DATASET_REPEAT = 10
++BENCH_N_SAMPLES = 500
+ 
+ FINETUNE_EPOCHS = 30
+ QAT_EPOCHS = 5
+diff --git a/src/data.py b/src/data.py
+index f4d931c..748c159 100644
+--- a/src/data.py
++++ b/src/data.py
+@@ -1,11 +1,45 @@
++import json
++import subprocess
++import zipfile
+ from pathlib import Path
+ 
+ import numpy as np
+ import torch
++from loguru import logger
+ from PIL import Image
+-from torch.utils.data import ConcatDataset, Dataset, random_split
++from torch.utils.data import Dataset, random_split
++from torchvision import tv_tensors
++from torchvision.transforms import v2
++
++from src.config import (BENCH_N_SAMPLES, CACHE_PATH, COMPETITION, DATA_DIR,
++                        GDRIVE_FILE_ID, IMG_SCALE, IMGS_DIR, MASKS_DIR)
++
++
++def _train_augmentations() -> v2.Compose:
++    return v2.Compose(
++        [
++            v2.RandomHorizontalFlip(p=0.5),
++            # v2.RandomRotation(degrees=10),
++            # v2.RandomPerspective(distortion_scale=0.2, p=0.3),
++            v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
++            v2.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
++            v2.RandomAdjustSharpness(sharpness_factor=2, p=0.3),
++        ]
++    )
++
++
++class AugmentedSubset(Dataset):
++    def __init__(self, subset, transform: v2.Compose):
++        self.subset = subset
++        self.transform = transform
++
++    def __len__(self):
++        return len(self.subset)
+ 
+-from src.config import DATA_DIR, DATASET_REPEAT, IMG_SCALE
++    def __getitem__(self, idx):
++        img, mask = self.subset[idx]
++        img, mask = self.transform(tv_tensors.Image(img), tv_tensors.Mask(mask))
++        return img.as_subclass(torch.Tensor), mask.as_subclass(torch.Tensor)
+ 
+ 
+ class CarvanaDataset(Dataset):
+@@ -63,9 +97,13 @@ class CarvanaDataset(Dataset):
+         img_files = list(self.images_dir.glob(name + ".*"))
+         mask_files = list(self.masks_dir.glob(name + "_mask.*"))
+         if not img_files:
+-            raise FileNotFoundError(f"No image found for id '{name}' in {self.images_dir}")
++            raise FileNotFoundError(
++                f"No image found for id '{name}' in {self.images_dir}"
++            )
+         if not mask_files:
+-            raise FileNotFoundError(f"No mask found for id '{name}' in {self.masks_dir}")
++            raise FileNotFoundError(
++                f"No mask found for id '{name}' in {self.masks_dir}"
++            )
+ 
+         img = Image.open(img_files[0]).convert("RGB")
+         mask = Image.open(mask_files[0]).convert("L")
+@@ -79,20 +117,109 @@ class CarvanaDataset(Dataset):
+         )
+ 
+ 
+-def get_carvana(split: str = "train", val_fraction: float = 0.1, scale: float = IMG_SCALE):
+-    imgs_dir = DATA_DIR / "carvana" / "imgs"
+-    masks_dir = DATA_DIR / "carvana" / "masks"
+-
+-    ds = CarvanaDataset(imgs_dir, masks_dir, scale=scale)
++def get_carvana(
++    split: str = "train", val_fraction: float = 0.1, scale: float = IMG_SCALE
++):
++    ds = CarvanaDataset(IMGS_DIR, MASKS_DIR, scale=scale)
+     n_val = max(1, int(len(ds) * val_fraction))
+     n_train = len(ds) - n_val
+     train_ds, val_ds = random_split(
+-        ds, [n_train, n_val],
++        ds,
++        [n_train, n_val],
+         generator=torch.Generator().manual_seed(42),
+     )
++    if split == "train":
++        return AugmentedSubset(train_ds, _train_augmentations())
++    return val_ds
++
+ 
+-    if DATASET_REPEAT > 1:
+-        train_ds = ConcatDataset([train_ds] * DATASET_REPEAT)
+-        val_ds = ConcatDataset([val_ds] * DATASET_REPEAT)
++class CachedDataset(Dataset):
++    def __init__(self, cache_path: Path = CACHE_PATH):
++        data = torch.load(cache_path, map_location="cpu", weights_only=True)
++        self.imgs = data["imgs"]  # float16
++        self.masks = data["masks"]  # uint8
+ 
+-    return train_ds if split == "train" else val_ds
++    def __len__(self):
++        return len(self.imgs)
++
++    def __getitem__(self, idx):
++        return self.imgs[idx].float(), self.masks[idx].long()
++
++
++def prepare_benchmark_cache(
++    cache_path: Path = CACHE_PATH,
++    n_samples: int = BENCH_N_SAMPLES,
++) -> None:
++    """Apply augmentations to n_samples once and save to cache_path for reproducible benchmarking."""
++    import random
++
++    torch.manual_seed(42)
++    random.seed(42)
++    np.random.seed(42)
++
++    ds = get_carvana("train")
++    indices = torch.randperm(len(ds), generator=torch.Generator().manual_seed(42))[
++        :n_samples
++    ].tolist()
++
++    imgs, masks = [], []
++    for i, idx in enumerate(indices):
++        img, mask = ds[idx]
++        imgs.append(img)
++        masks.append(mask)
++        if (i + 1) % 50 == 0:
++            logger.info(f"Prepared {i + 1}/{n_samples} samples...")
++
++    cache_path.parent.mkdir(parents=True, exist_ok=True)
++    torch.save(
++        {"imgs": torch.stack(imgs).half(), "masks": torch.stack(masks).to(torch.uint8)},
++        cache_path,
++    )
++    size_mb = cache_path.stat().st_size / 1024**2
++    logger.info(f"Saved {n_samples} samples ({size_mb:.0f} MB) → {cache_path}")
++
++
++def download_bench_cache(cache_path: Path = CACHE_PATH) -> None:
++    """Download benchmark cache from Google Drive (set GDRIVE_FILE_ID in config.py)."""
++    if not GDRIVE_FILE_ID:
++        raise ValueError("GDRIVE_FILE_ID is not set in config.py")
++    try:
++        import gdown
++    except ImportError:
++        raise ImportError("gdown is required: uv sync")
++    cache_path.parent.mkdir(parents=True, exist_ok=True)
++    logger.info("Downloading benchmark cache from Google Drive...")
++    gdown.download(id=GDRIVE_FILE_ID, output=str(cache_path), quiet=False)
++
++
++def download_carvana() -> None:
++    """Download Carvana images and masks from Kaggle into dest_dir."""
++
++    DATA_DIR.mkdir(parents=True, exist_ok=True)
++
++    for filename in "train", "train_masks":
++        zip_path = DATA_DIR / f"{filename}.zip"
++
++        if not zip_path.exists():
++            logger.info(f"Downloading {filename} …")
++            subprocess.run(
++                [
++                    "kaggle",
++                    "competitions",
++                    "download",
++                    "-c",
++                    COMPETITION,
++                    "-f",
++                    f"{filename}.zip",
++                    "-p",
++                    str(DATA_DIR),
++                ],
++                check=True,
++            )
++
++        logger.info(f"Extracting {filename} …")
++        with zipfile.ZipFile(zip_path) as zf:
++            zf.extractall(DATA_DIR)
++        zip_path.unlink()
++
++    logger.info("Carvana dataset ready.")
+diff --git a/src/main.py b/src/main.py
+index 4ca1b61..53432d3 100644
+--- a/src/main.py
++++ b/src/main.py
+@@ -1,234 +1,224 @@
+ import argparse
+-import os
++import json
+ 
+ import torch
+-from torch.utils.data import DataLoader
+ from loguru import logger
++from torch.utils.data import DataLoader
+ 
+-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+-
+-from src.config import DEVICE, BATCH_SIZE, DATA_DIR, IMG_SCALE
+-from src.utils import load_model, print_results, download_carvana, reset_gpu_state, log_gpu
+-from src.data import get_carvana
++from src.benchmark import BenchmarkResult, run_benchmark
++from src.config import (BATCH_SIZE, BENCH_N_SAMPLES, CACHE_PATH, DATA_DIR,
++                        DEVICE, RESULTS_DIR)
++from src.data import (CachedDataset, download_bench_cache, download_carvana,
++                      prepare_benchmark_cache)
+ from src.finetune.finetune import finetune, finetune_qat
+-from src.model import apply_compiled, apply_int8, apply_fp8
+-from src.run_benchmark import run_benchmark
++from src.model import apply_compiled, apply_fp8, apply_int8, apply_pruning, apply_sparse_2_4, load_model
++from src.utils import print_results, set_seed
+ 
+ 
+ def main():
+     parser = argparse.ArgumentParser()
+     parser.add_argument("--finetune", action="store_true")
+     parser.add_argument("--finetune-qat", action="store_true")
+-    parser.add_argument("--download", action="store_true",
+-                        help="Download Carvana from Kaggle (requires ~/.kaggle/kaggle.json)")
+-    parser.add_argument("--trt", action="store_true",
+-                        help="Include TensorRT FP16 experiment (requires tensorrt-cu12)")
+-    parser.add_argument("--tvm", action="store_true",
+-                        help="Include TVM FP16/FP32 experiments (requires .venv-tvm311)")
+-    parser.add_argument("--tvm-tune", action="store_true",
+-                        help="Run AutoTVM tuning before TVM compilation (slow but improves performance)")
+-    parser.add_argument("--tvm-tune-trials", type=int, default=1000,
+-                        help="Number of AutoTVM trials per task (default: 1000). "
+-                             "Only used with --tvm --tvm-tune.")
+-    parser.add_argument("--profile", action="store_true",
+-                        help="Run torch.profiler on each experiment and save chrome traces to tmp/profiles/")
++    parser.add_argument(
++        "--download",
++        action="store_true",
++        help="Download Carvana from Kaggle (requires ~/.kaggle/kaggle.json)",
++    )
++    parser.add_argument(
++        "--trt",
++        action="store_true",
++        help="Include TensorRT experiments (requires tensorrt-cu12)",
++    )
++    parser.add_argument(
++        "--profile",
++        action="store_true",
++        help="Run torch.profiler on each experiment and save chrome traces to tmp/profiles/",
++    )
++    parser.add_argument(
++        "--batch-sizes",
++        nargs="+",
++        type=int,
++        default=[BATCH_SIZE],
++        metavar="BS",
++        help="Batch sizes to sweep (e.g. --batch-sizes 1 4 8 16)",
++    )
++    parser.add_argument(
++        "--prepare-cache",
++        action="store_true",
++        help=f"Preprocess {BENCH_N_SAMPLES} samples from Carvana and save to tmp/bench_cache.pt",
++    )
+     args = parser.parse_args()
+ 
+-    carvana_dir = DATA_DIR / "carvana"
+-    if (carvana_dir / "imgs").exists():
+-        print(f"Found existing dataset at {carvana_dir}")
+-    elif args.download:
+-        download_carvana(carvana_dir)
+-    else:
+-        raise FileNotFoundError(
+-            f"No dataset at {carvana_dir}. Run with --download to fetch from Kaggle."
+-        )
+-
+-    print(f"Device: {DEVICE}")
++    logger.info(f"Device: {DEVICE}")
+     if torch.cuda.is_available():
++        torch.cuda.set_device(DEVICE)
+         for i in range(torch.cuda.device_count()):
+-            print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+-        major, minor = torch.cuda.get_device_capability()
+-        sm = major * 10 + minor
+-        if sm < 80:
+-            logger.warning("INT8 tensor cores require SM 80+ (Ampere). Performance may be limited.")
+-        if sm < 89:
+-            logger.warning("FP8 tensor cores require SM 89+ (Ada Lovelace/Hopper). FP8 will use emulation.")
++            logger.info(f"GPU {i}: {torch.cuda.get_device_name(i)}")
+ 
+     model = load_model()
+ 
+-    if args.finetune:
+-        print("\n── Finetuning ──────────────────────────────────")
+-        finetune(model)
+-        model = load_model()
++    # ── Prepare cache (needs raw Carvana data) ───────────────────────────────
++    if args.prepare_cache:
++        if args.download:
++            download_carvana()
++        elif not (DATA_DIR / "train").exists():
++            raise FileNotFoundError(
++                f"No dataset at {DATA_DIR}. Run with --prepare-cache --download to fetch from Kaggle and prepare cache."
++            )
++        if args.finetune:
++            logger.info("\nFinetuning")
++            finetune(model)
++            model = load_model()
++        if args.finetune_qat:
++            logger.info("\nQuantization Aware Finetuning")
++            finetune_qat(model)
++        prepare_benchmark_cache()
++        logger.info(
++            "Cache ready. Upload tmp/bench_cache.pt to Google Drive and set GDRIVE_FILE_ID in config.py"
++        )
++        return
+ 
+-    if args.finetune_qat:
+-        print("\n── QAT Finetuning ───────────────────────────────")
+-        finetune_qat(model)
++    # ── Benchmark (only needs cache) ─────────────────────────────────────────
++    if CACHE_PATH.exists():
++        logger.info(f"Loading benchmark cache from {CACHE_PATH}")
++        dataset = CachedDataset(CACHE_PATH)
++    else:
++        logger.info("No cache found, attempting download from Google Drive...")
++        download_bench_cache()
++        dataset = CachedDataset(CACHE_PATH)
+ 
+-    val_ds = get_carvana("val")
+-    val_loader = DataLoader(
+-        val_ds, batch_size=BATCH_SIZE, shuffle=False,
+-        num_workers=4, pin_memory=(DEVICE.type == "cuda"),
+-    )
+-    train_ds = get_carvana("train")
+-    train_loader = DataLoader(
+-        train_ds, batch_size=BATCH_SIZE, shuffle=True,
+-        num_workers=4, pin_memory=(DEVICE.type == "cuda"),
+-    )
+-    results = []
+-
+-    def bench(m, loader, device, name, precision, **kw):
+-        print(f"\n── {name} {'─' * max(0, 52 - len(name))}")
+-        log_gpu(f"start {name}")
+-
+-        r = run_benchmark(m, loader, device, name, precision,
+-                          profile=args.profile, **kw)
+-        log_gpu(f"end {name}")
+-
+-        results.append(r)
+-        del m
+-        reset_gpu_state()
+-        model.cpu()
+-
+-    # ── 1. FP16 baseline (GPU) ────────────────────────────────────
+-    bench(model, val_loader, DEVICE, "fp16_baseline", "fp16")
+-
+-    # ── 2. torch.compile FP16 (GPU) ──────────────────────────────
+-    print("\nCompiling model (first run will be slow)…")
+-    bench(apply_compiled(model), val_loader, DEVICE, "compile_fp16", "fp16",
+-          skip_batches=2)
+-
+-    # ── 3. FP8 torchao (GPU, SM 8.9+) ───────────────────────────
+-    print("\nApplying FP8 dynamic activation + weight quantization (torchao)…")
+-    reset_gpu_state()
+-    bench(torch.compile(apply_fp8(model), mode="max-autotune-no-cudagraphs"),
+-          val_loader, DEVICE, "fp8_torchao", "fp8", skip_batches=2)
+-
+-    # ── 4. torchao INT8 (GPU) ────────────────────────────────────
+-    print("\nApplying INT8 static activation + weight quantization (torchao)…")
+-    reset_gpu_state()
+-    bench(torch.compile(apply_int8(model, calib_dataloader=train_loader), mode="max-autotune-no-cudagraphs"),
+-          val_loader, DEVICE, "int8_torchao", "int8", skip_batches=2)
+-
+-    # ── 5 & 6. TRT experiments (GPU) ─────────────────────────────
++    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
++    (RESULTS_DIR / "summary.json").write_text("[]")
++
++    # ── Build TRT engines once (dynamic batch, reused across BS sweep) ──────
++    trt_models = {}
+     if args.trt:
+         try:
+-            import tensorrt as _trt  # noqa: F401 — availability check
++            import tensorrt  # noqa: F401
+         except ImportError:
+             raise ImportError(
+                 "TensorRT is required for --trt. Install with: uv sync --extra trt"
+             )
+-        from src.config import (
+-            ONNX_PATH, TRT_FP16_PATH, TRT_INT8_PATH, CALIB_PATH,
+-        )
+-        from src.trt import (
+-            export_to_onnx, save_calib_data, build_trt_engine, TRTModel,
++        from src.config import (CALIB_PATH, ONNX_PATH, TRT_FP8_PATH,
++                                TRT_FP16_PATH, TRT_INT8_PATH)
++        from src.trt import (TRTModel, build_trt_engine, export_to_onnx,
++                             save_calib_data)
++
++        calib_loader = DataLoader(
++            dataset,
++            batch_size=BATCH_SIZE,
++            shuffle=False,
++            num_workers=4,
++            pin_memory=(DEVICE.type == "cuda"),
+         )
+-        sample, _ = next(iter(val_loader))
++        sample, _ = next(iter(calib_loader))
+         export_to_onnx(model, sample, ONNX_PATH)
+-        save_calib_data(val_loader, n_samples=200, calib_path=CALIB_PATH)
++        save_calib_data(calib_loader, n_samples=200, calib_path=CALIB_PATH)
+ 
+         print("\nBuilding TRT FP16 engine…")
+         build_trt_engine(ONNX_PATH, TRT_FP16_PATH, fp16=True)
+-        bench(TRTModel(TRT_FP16_PATH, DEVICE), val_loader, DEVICE, "trt_fp16", "fp16")
++        trt_models["trt_fp16"] = ("fp16", TRT_FP16_PATH)
++
++        print("\nBuilding TRT FP8 engine (calibrating)…")
++        build_trt_engine(ONNX_PATH, TRT_FP8_PATH, fp8=True, calib_path=CALIB_PATH)
++        trt_models["trt_fp8"] = ("fp8", TRT_FP8_PATH)
+ 
+         print("\nBuilding TRT INT8 engine (calibrating)…")
+-        build_trt_engine(
+-            ONNX_PATH, TRT_INT8_PATH,
+-            int8=True, calib_path=CALIB_PATH,
++        build_trt_engine(ONNX_PATH, TRT_INT8_PATH, int8=True, calib_path=CALIB_PATH)
++        trt_models["trt_int8"] = ("int8", TRT_INT8_PATH)
++
++    # ── Batch size sweep ─────────────────────────────────────────────────────
++    for bs in args.batch_sizes:
++        logger.info(f"Batch size: {bs}")
++
++        dataloader = DataLoader(
++            dataset,
++            batch_size=bs,
++            shuffle=False,
++            num_workers=4,
++            pin_memory=(DEVICE.type == "cuda"),
++            worker_init_fn=set_seed,
+         )
+-        bench(TRTModel(TRT_INT8_PATH, DEVICE), val_loader, DEVICE, "trt_int8", "int8")
+-
+-    # ── TVM experiments
+-    if args.tvm:
+-        from src.config import ONNX_PATH
+-        from src.trt import export_to_onnx
+-        from src.tvm import run_tvm_benchmark
+-
+-        # Ensure ONNX export exists
+-        if not ONNX_PATH.exists():
+-            sample, _ = next(iter(val_loader))
+-            export_to_onnx(model, sample, ONNX_PATH)
+-
+-        carvana_dir = DATA_DIR / "carvana"
+-
+-        # TVM FP16
+-        print("\n── TVM FP16 ──")
+-        tvm_fp16_results = run_tvm_benchmark(
+-            onnx_path=ONNX_PATH,
+-            data_dir=carvana_dir,
+-            precision="fp16",
+-            batch_size=BATCH_SIZE,
+-            img_scale=IMG_SCALE,
+-            max_batches=10,
+-            tune=args.tvm_tune,
+-            tune_trials=args.tvm_tune_trials,
++        run_benchmark(
++            model, dataloader, DEVICE, f"fp32_baseline_bs{bs}", "fp32", args.profile
+         )
+-        # Convert to BenchmarkResult for consistent output
+-        from src.utils import BenchmarkResult
+-        tvm_fp16_result = BenchmarkResult(
+-            pipeline_name=tvm_fp16_results["pipeline_name"],
+-            precision=tvm_fp16_results["precision"],
+-            device=tvm_fp16_results["device"],
+-            batch_size=tvm_fp16_results["batch_size"],
+-            num_batches=tvm_fp16_results.get("num_batches", 0),
+-            total_samples=tvm_fp16_results["total_samples"],
+-            latency_mean_ms=tvm_fp16_results["latency_compute_mean_ms"],
+-            latency_std_ms=tvm_fp16_results["latency_compute_std_ms"],
+-            latency_p50_ms=tvm_fp16_results["latency_compute_p50_ms"],
+-            latency_p95_ms=tvm_fp16_results["latency_compute_p95_ms"],
+-            latency_p99_ms=tvm_fp16_results["latency_compute_p99_ms"],
+-            throughput_samples_per_sec=tvm_fp16_results["throughput_compute_samples_per_s"],
+-            miou=tvm_fp16_results.get("miou"),
+-            dice=tvm_fp16_results.get("dice"),
+-            peak_gpu_memory_MB=tvm_fp16_results.get("peak_gpu_memory_MB"),
+-            model_size_MB=0.0,
++
++        run_benchmark(
++            model, dataloader, DEVICE, f"fp16_baseline_bs{bs}", "fp16", args.profile
+         )
+-        results.append(tvm_fp16_result)
+-        print(f"  TVM FP16 compute: {tvm_fp16_results['latency_compute_mean_ms']:.2f} ms, "
+-              f"e2e: {tvm_fp16_results['latency_e2e_mean_ms']:.2f} ms")
+-
+-        # TVM FP32
+-        print("\n── TVM FP32 ──")
+-        tvm_fp32_results = run_tvm_benchmark(
+-            onnx_path=ONNX_PATH,
+-            data_dir=carvana_dir,
+-            precision="fp32",
+-            batch_size=BATCH_SIZE,
+-            img_scale=IMG_SCALE,
+-            max_batches=10,
+-            tune=args.tvm_tune,
+-            tune_trials=args.tvm_tune_trials,
++
++        run_benchmark(
++            apply_compiled(model),
++            dataloader,
++            DEVICE,
++            f"compile_fp32_bs{bs}",
++            "fp32",
++            args.profile,
+         )
+-        tvm_fp32_result = BenchmarkResult(
+-            pipeline_name=tvm_fp32_results["pipeline_name"],
+-            precision=tvm_fp32_results["precision"],
+-            device=tvm_fp32_results["device"],
+-            batch_size=tvm_fp32_results["batch_size"],
+-            num_batches=tvm_fp32_results.get("num_batches", 0),
+-            total_samples=tvm_fp32_results["total_samples"],
+-            latency_mean_ms=tvm_fp32_results["latency_compute_mean_ms"],
+-            latency_std_ms=tvm_fp32_results["latency_compute_std_ms"],
+-            latency_p50_ms=tvm_fp32_results["latency_compute_p50_ms"],
+-            latency_p95_ms=tvm_fp32_results["latency_compute_p95_ms"],
+-            latency_p99_ms=tvm_fp32_results["latency_compute_p99_ms"],
+-            throughput_samples_per_sec=tvm_fp32_results["throughput_compute_samples_per_s"],
+-            miou=tvm_fp32_results.get("miou"),
+-            dice=tvm_fp32_results.get("dice"),
+-            peak_gpu_memory_MB=tvm_fp32_results.get("peak_gpu_memory_MB"),
+-            model_size_MB=0.0,
++
++        run_benchmark(
++            apply_compiled(model),
++            dataloader,
++            DEVICE,
++            f"compile_fp16_bs{bs}",
++            "fp16",
++            args.profile,
+         )
+-        results.append(tvm_fp32_result)
+-        print(f"  TVM FP32 compute: {tvm_fp32_results['latency_compute_mean_ms']:.2f} ms, "
+-              f"e2e: {tvm_fp32_results['latency_e2e_mean_ms']:.2f} ms")
+ 
+-    print_results(results)
++        logger.info("\nApplying FP8 weight quantization (torchao)…")
++        run_benchmark(
++            apply_fp8(model),
++            dataloader,
++            DEVICE,
++            f"fp8_torchao_bs{bs}",
++            "fp8",
++            args.profile,
++        )
+ 
+-    if args.profile:
+-        from src.config import PROFILE_DIR
+-        print(f"\nChrome traces saved to {PROFILE_DIR}/")
+-        print("Open at chrome://tracing or https://ui.perfetto.dev")
++        run_benchmark(
++            apply_int8(model),
++            dataloader,
++            DEVICE,
++            f"int8_torchao_bs{bs}",
++            "int8",
++            args.profile,
++        )
++
++        # ── 2:4 structured sparsity ──────────────────────────────────────────
++        run_benchmark(
++            apply_sparse_2_4(model),
++            dataloader,
++            DEVICE,
++            f"sparse_2_4_bs{bs}",
++            "fp32",
++            args.profile,
++        )
++
++        # ── Unstructured magnitude pruning ───────────────────────────────────
++        for sparsity in [0.3, 0.5, 0.7]:
++            run_benchmark(
++                apply_pruning(model, sparsity),
++                dataloader,
++                DEVICE,
++                f"pruning_{int(sparsity * 100)}pct_bs{bs}",
++                "fp32",
++                args.profile,
++            )
++
++        for exp_name, (precision, engine_path) in trt_models.items():
++            run_benchmark(
++                TRTModel(engine_path, DEVICE),
++                dataloader,
++                DEVICE,
++                f"{exp_name}_bs{bs}",
++                precision,
++                args.profile,
++            )
++
++    summary_path = RESULTS_DIR / "summary.json"
++    results = [BenchmarkResult(**d) for d in json.loads(summary_path.read_text())]
++    print_results(results)
++    print(f"\nFull results saved to {summary_path}")
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/src/metrics.py b/src/metrics.py
+index 7773ad0..14a5ccb 100644
+--- a/src/metrics.py
++++ b/src/metrics.py
+@@ -21,7 +21,7 @@ def update_conf_matrix(conf_matrix, preds, targets, num_classes):
+     mask = (targets >= 0) & (targets < num_classes) & (targets != 255)
+     conf_matrix += torch.bincount(
+         (num_classes * targets[mask] + preds[mask]).view(-1),
+-        minlength=num_classes ** 2,
++        minlength=num_classes**2,
+     ).reshape(num_classes, num_classes)
+ 
+ 
+diff --git a/src/model.py b/src/model.py
+index d79a1c9..597bbfc 100644
+--- a/src/model.py
++++ b/src/model.py
+@@ -1,31 +1,86 @@
+ import copy
++from typing import Callable
++
+ import torch
+-from torchao.quantization import quantize_, Float8DynamicActivationFloat8WeightConfig, Int8StaticActivationInt8WeightConfig
+-
+-from src.config import IMG_SCALE
+-
+-
+-_CHECKPOINTS = {
+-    0.5: "https://github.com/milesial/Pytorch-UNet/releases/download/v3.0/unet_carvana_scale0.5_epoch2.pth",
+-    1.0: "https://github.com/milesial/Pytorch-UNet/releases/download/v3.0/unet_carvana_scale1.0_epoch2.pth",
+-}
+-
+-
+-def build_model(scale=IMG_SCALE):
+-    """Load milesial/Pytorch-UNet pretrained on Carvana, always to CPU."""
+-    model = torch.hub.load(
+-        "milesial/Pytorch-UNet",
+-        "unet_carvana",
+-        pretrained=False,
+-        scale=scale,
+-    )
+-    if scale not in _CHECKPOINTS:
+-        raise ValueError(f"No pretrained checkpoint for scale={scale}. Use 0.5 or 1.0.")
+-    state_dict = torch.hub.load_state_dict_from_url(
+-        _CHECKPOINTS[scale], map_location="cpu", progress=True
+-    )
+-    state_dict.pop("mask_values", None)
+-    model.load_state_dict(state_dict)
++from loguru import logger
++from torchao.quantization import (Float8WeightOnlyConfig,
++                                  Int8DynamicActivationInt8WeightConfig,
++                                  quantize_)
++
++from src.config import CKPT_PATH, IMG_SCALE
++
++
++def load_model(pretrained=True):
++    """Load milesial/Pytorch-UNet pretrained on Carvana."""
++    if CKPT_PATH.exists():
++        model = torch.hub.load(
++            "milesial/Pytorch-UNet",
++            "unet_carvana",
++            pretrained=False,
++            scale=IMG_SCALE,
++        )
++        model.load_state_dict(torch.load(CKPT_PATH, map_location="cpu"))
++        logger.info(f"Loaded checkpoint: {CKPT_PATH}")
++    else:
++        model = torch.hub.load(
++            "milesial/Pytorch-UNet",
++            "unet_carvana",
++            pretrained=pretrained,
++            scale=IMG_SCALE,
++        )
++        print("Loaded pretrained U-Net")
++    return model
++
++
++def warmup_model(
++    model: Callable,
++    dummy_input: torch.Tensor,
++    n_iters: int = 10,
++    device: torch.device | None = None,
++    precision: str = "fp32",
++) -> None:
++    use_amp = precision != "fp32" and device is not None and device.type == "cuda"
++    with torch.no_grad():
++        for _ in range(n_iters):
++            if use_amp:
++                with torch.amp.autocast("cuda", dtype=torch.float16):
++                    _ = model(dummy_input)
++            else:
++                _ = model(dummy_input)
++    if device and device.type == "cuda":
++        torch.cuda.synchronize(device)
++
++
++def forward(model, x: torch.Tensor, precision: str) -> torch.Tensor:
++    if precision != "fp32" and x.device.type == "cuda":
++        with torch.amp.autocast("cuda", dtype=torch.float16):
++            return model(x)
++    return model(x)
++
++
++def apply_pruning(model, sparsity: float = 0.5):
++    """Global unstructured magnitude pruning across all Conv2d weights."""
++    from torch.nn.utils import prune
++    model = copy.deepcopy(model).cuda().eval()
++    params = [(m, "weight") for m in model.modules() if isinstance(m, torch.nn.Conv2d)]
++    prune.global_unstructured(params, pruning_method=prune.L1Unstructured, amount=sparsity)
++    for m, _ in params:
++        prune.remove(m, "weight")
++    return model
++
++
++def apply_sparse_2_4(model):
++    """Apply 2:4 structured sparsity mask to all Conv2d weights (no runtime speedup — Conv2d not supported by cuSPARSELt)."""
++    model = copy.deepcopy(model).cuda().eval()
++    for m in model.modules():
++        if isinstance(m, torch.nn.Conv2d):
++            with torch.no_grad():
++                w = m.weight.data
++                shape = w.shape
++                w_flat = w.view(-1, 4)
++                mask = torch.zeros_like(w_flat)
++                mask.scatter_(1, w_flat.abs().topk(2, dim=1).indices, 1)
++                m.weight.copy_((w_flat * mask).view(shape))
+     return model
+ 
+ 
+@@ -34,27 +89,15 @@ def apply_compiled(model):
+     return torch.compile(model, mode="max-autotune-no-cudagraphs")
+ 
+ 
+-def apply_int8(model, calib_dataloader=None):
+-    """INT8 static activation + weight quantization via torchao (GPU).
+-
+-    If *calib_dataloader* is provided, a few batches are forwarded to
+-    collect activation statistics for static quantization.
+-    """
++def apply_int8(model):
++    """INT8 dynamic activation + weight quantization via torchao (GPU)."""
+     model = copy.deepcopy(model).cuda().eval()
+-    quantize_(model, Int8StaticActivationInt8WeightConfig())
+-    # Calibration: run representative data to collect activation statistics
+-    if calib_dataloader is not None:
+-        with torch.no_grad():
+-            for i, (images, _) in enumerate(calib_dataloader):
+-                images = images.cuda()
+-                model(images)
+-                if i >= 2:  # A few batches is enough for calibration
+-                    break
++    quantize_(model, Int8DynamicActivationInt8WeightConfig())
+     return model
+ 
+ 
+ def apply_fp8(model):
+-    """FP8 dynamic activation + weight quantization via torchao (requires SM 8.9+, e.g. RTX 4090)."""
++    """FP8 weight-only quantization via torchao (requires SM 8.9+, e.g. RTX 4090)."""
+     model = copy.deepcopy(model).cuda().eval()
+-    quantize_(model, Float8DynamicActivationFloat8WeightConfig())
++    quantize_(model, Float8WeightOnlyConfig())
+     return model
+diff --git a/src/utils.py b/src/utils.py
+index 00115e2..57b03d1 100644
+--- a/src/utils.py
++++ b/src/utils.py
+@@ -1,112 +1,16 @@
+ import gc
+-import json
+-import zipfile
+-import torch
+-from dataclasses import dataclass, asdict
++import random
+ from pathlib import Path
+-from typing import Callable, Optional
+-
+-from src.config import CKPT_PATH
+-from src.model import build_model
+-
+-
+-def log_gpu(tag: str):
+-    if torch.cuda.is_available():
+-        alloc = torch.cuda.memory_allocated() / 1024**2
+-        reserv = torch.cuda.memory_reserved() / 1024**2
+-        free, total = torch.cuda.mem_get_info()
+-        free = free / 1024**2
+-        total = total / 1024**2
+-
+-        print(
+-            f"[GPU {tag}] "
+-            f"allocated={alloc:.1f}MB | reserved={reserv:.1f}MB | "
+-            f"free={free:.1f}MB | total={total:.1f}MB"
+-        )
+-
+-@dataclass
+-class BenchmarkResult:
+-    pipeline_name: str
+-    precision: str
+-    device: str
+-    batch_size: int
+-    num_batches: int
+-    total_samples: int
+-
+-    latency_mean_ms: float
+-    latency_p50_ms: float
+-    latency_p95_ms: float
+-    latency_p99_ms: float
+-    latency_std_ms: float
+-
+-    throughput_samples_per_sec: float
+-
+-    model_params_M: Optional[float] = None
+-    model_size_MB: Optional[float] = None
+-    peak_gpu_memory_MB: Optional[float] = None
+-
+-    miou: Optional[float] = None
+-    dice: Optional[float] = None
+-
+-    def to_dict(self) -> dict:
+-        return asdict(self)
+-
+-    def save(self, path: str | Path) -> None:
+-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+-        with open(path, "w") as f:
+-            json.dump(self.to_dict(), f, indent=2)
+-
+-    @classmethod
+-    def load(cls, path: str | Path):
+-        with open(path) as f:
+-            return cls(**json.load(f))
+ 
+-    def __str__(self) -> str:
+-        mem = f"{self.peak_gpu_memory_MB:.0f} MB" if self.peak_gpu_memory_MB else "n/a"
+-        lines = [
+-            f"Pipeline:    {self.pipeline_name}",
+-            f"Precision:   {self.precision}",
+-            f"Device:      {self.device}",
+-            f"Batch size:  {self.batch_size}",
+-            f"Samples:     {self.total_samples}",
+-            f"Latency:     {self.latency_mean_ms:.2f} ± "
+-            f"{self.latency_std_ms:.2f} ms "
+-            f"(p50={self.latency_p50_ms:.2f}, p95={self.latency_p95_ms:.2f})",
+-            f"Throughput:  {self.throughput_samples_per_sec:.1f} samples/s",
+-            f"Peak GPU mem:{mem}",
+-            f"mIoU:        {self.miou}",
+-            f"Dice:        {self.dice}",
+-        ]
+-        return "\n".join(lines)
+-
+-
+-def load_model():
+-    model = build_model()
+-    if CKPT_PATH.exists():
+-        model.load_state_dict(torch.load(CKPT_PATH, map_location="cpu"))
+-        print(f"Loaded checkpoint: {CKPT_PATH}")
+-    else:
+-        print("No checkpoint found — using milesial/Pytorch-UNet pretrained weights.")
+-    return model
++import numpy as np
++import torch
++from loguru import logger
+ 
+ 
+-def warmup_model(
+-    model: Callable,
+-    dummy_input: torch.Tensor,
+-    n_iters: int = 10,
+-    device: Optional[torch.device] = None,
+-    precision: str = "fp32",
+-) -> None:
+-    use_amp = precision != "fp32" and device is not None and device.type == "cuda"
+-    with torch.no_grad():
+-        for _ in range(n_iters):
+-            if use_amp:
+-                with torch.amp.autocast("cuda", dtype=torch.float16):
+-                    _ = model(dummy_input)
+-            else:
+-                _ = model(dummy_input)
+-    if device and device.type == "cuda":
+-        torch.cuda.synchronize(device)
++def set_seed(worker_id):
++    seed = torch.initial_seed() % 2**32
++    np.random.seed(seed)
++    random.seed(seed)
+ 
+ 
+ def get_model_size_mb(model) -> float:
+@@ -119,93 +23,36 @@ def get_model_size_mb(model) -> float:
+ 
+ def print_results(results):
+     header = (
+-        f"{'Experiment':<22} {'Prec':<6} {'Dev':<5} "
+-        f"{'Lat(ms)':<10} {'p95(ms)':<9} {'Tput(img/s)':<13} "
+-        f"{'mIoU':<8} {'Dice':<8} {'GPU mem(MB)':<13} {'Size(MB)'}"
++        f"{'Experiment':<26} {'Prec':<6} "
++        f"{'Lat(mean)':<10} {'Lat(p50)':<9} {'Lat(p95)':<9} {'Lat(p99)':<9} "
++        f"{'Tput(img/s)':<13} {'mIoU':<8} {'Dice':<8} {'GPU mem(MB)'}"
+     )
+     print("\n" + header)
+     print("─" * len(header))
+     for r in results:
+         gpu_mem = f"{r.peak_gpu_memory_MB:.0f}" if r.peak_gpu_memory_MB else "n/a"
+-        dev = r.device.split(":")[0]  # "cuda:0" → "cuda"
+         print(
+-            f"{r.pipeline_name:<22} {r.precision:<6} {dev:<5} "
+-            f"{r.latency_mean_ms:<10.1f} {r.latency_p95_ms:<9.1f} "
++            f"{r.pipeline_name:<26} {r.precision:<6} "
++            f"{r.latency_mean_ms:<10.1f} {r.latency_p50_ms:<9.1f} "
++            f"{r.latency_p95_ms:<9.1f} {r.latency_p99_ms:<9.1f} "
+             f"{r.throughput_samples_per_sec:<13.1f} "
+-            f"{r.miou:<8.4f} {r.dice:<8.4f} {gpu_mem:<13} {r.model_size_MB:.1f}"
++            f"{r.miou:<8.4f} {r.dice:<8.4f} {gpu_mem}"
+         )
+ 
+ 
+-def _validate_zip(zip_path: Path) -> bool:
+-    """Return True if *zip_path* is a valid, non-corrupted zip archive."""
+-    try:
+-        with zipfile.ZipFile(zip_path) as zf:
+-            bad = zf.testzip()
+-            return bad is None  # None means every entry is OK
+-    except (zipfile.BadZipFile, OSError):
+-        return False
+-
+-
+-def download_carvana(dest_dir: Path) -> None:
+-    """Download Carvana images and masks from Kaggle into dest_dir.
+-
+-    Requires ~/.kaggle/kaggle.json and competition rules accepted at
+-    kaggle.com/c/carvana-image-masking-challenge.
+-    Result layout: dest_dir/imgs/  and  dest_dir/masks/
+-    """
+-    import subprocess
+-
+-    dest_dir.mkdir(parents=True, exist_ok=True)
+-    comp = "carvana-image-masking-challenge"
+-
+-    for filename, folder_name, label in [
+-        ("train.zip",       "train",       "imgs"),
+-        ("train_masks.zip", "train_masks", "masks"),
+-    ]:
+-        zip_path = dest_dir / filename
+-
+-        # If a corrupted zip exists from a previous failed download, delete it
+-        # so the kaggle CLI doesn't skip re-downloading it.
+-        if zip_path.exists():
+-            if _validate_zip(zip_path):
+-                print(f"{filename} already exists and is valid, skipping download.")
+-            else:
+-                print(f"{filename} exists but is corrupted, deleting and re-downloading …")
+-                zip_path.unlink()
+-
+-        if not zip_path.exists():
+-            print(f"Downloading {filename} …")
+-            subprocess.run(
+-                ["kaggle", "competitions", "download", "-c", comp, "-f", filename, "-p", str(dest_dir)],
+-                check=True,
+-            )
+-
+-        # Validate the downloaded zip before extraction; retry with --force if
+-        # it is corrupted (e.g. interrupted download, stale cache).
+-        if not _validate_zip(zip_path):
+-            print(f"{filename} is corrupted after download, retrying with --force …")
+-            zip_path.unlink()
+-            subprocess.run(
+-                ["kaggle", "competitions", "download", "-c", comp, "-f", filename, "-p", str(dest_dir), "--force"],
+-                check=True,
+-            )
+-            if not _validate_zip(zip_path):
+-                raise zipfile.BadZipFile(
+-                    f"{filename} is still corrupted after forced re-download. "
+-                    "Check your network connection and Kaggle credentials."
+-                )
+-
+-        print(f"Extracting {filename} …")
+-        with zipfile.ZipFile(zip_path) as zf:
+-            zf.extractall(dest_dir)
+-        zip_path.unlink()
+-
+-        extracted = dest_dir / folder_name
+-        target = dest_dir / label
+-        if extracted.exists() and not target.exists():
+-            extracted.rename(target)
++def log_gpu(tag: str):
++    if torch.cuda.is_available():
++        alloc = torch.cuda.memory_allocated() / 1024**2
++        reserv = torch.cuda.memory_reserved() / 1024**2
++        free, total = torch.cuda.mem_get_info()
++        free = free / 1024**2
++        total = total / 1024**2
+ 
+-    print("Carvana dataset ready.")
++        logger.info(
++            f"[GPU {tag}] "
++            f"allocated={alloc:.1f}MB | reserved={reserv:.1f}MB | "
++            f"free={free:.1f}MB | total={total:.1f}MB"
++        )
+ 
+ 
+ def reset_gpu_state() -> None:

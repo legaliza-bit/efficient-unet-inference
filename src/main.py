@@ -30,6 +30,22 @@ def main():
         help="Include TensorRT experiments (requires tensorrt-cu12)",
     )
     parser.add_argument(
+        "--tvm",
+        action="store_true",
+        help="Include TVM FP16/FP32 experiments (requires apache-tvm-cu12)",
+    )
+    parser.add_argument(
+        "--tvm-tune",
+        action="store_true",
+        help="Run AutoTVM tuning before TVM compilation (slow but improves performance)",
+    )
+    parser.add_argument(
+        "--tvm-tune-trials",
+        type=int,
+        default=1000,
+        help="Number of AutoTVM trials per task (default: 1000). Only used with --tvm --tvm-tune.",
+    )
+    parser.add_argument(
         "--profile",
         action="store_true",
         help="Run torch.profiler on each experiment and save chrome traces to tmp/profiles/",
@@ -92,17 +108,10 @@ def main():
 
     # ── Build TRT engines once (dynamic batch, reused across BS sweep) ──────
     trt_models = {}
-    if args.trt:
-        try:
-            import tensorrt  # noqa: F401
-        except ImportError:
-            raise ImportError(
-                "TensorRT is required for --trt. Install with: uv sync --extra trt"
-            )
-        from src.config import (CALIB_PATH, ONNX_PATH, TRT_FP8_PATH,
-                                TRT_FP16_PATH, TRT_INT8_PATH)
-        from src.trt import (TRTModel, build_trt_engine, export_to_onnx,
-                             save_calib_data)
+    
+    if args.trt or args.tvm:
+        from src.config import ONNX_PATH
+        from src.trt import export_to_onnx
 
         calib_loader = DataLoader(
             dataset,
@@ -113,6 +122,17 @@ def main():
         )
         sample, _ = next(iter(calib_loader))
         export_to_onnx(model, sample, ONNX_PATH)
+
+    if args.trt:
+        try:
+            import tensorrt  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "TensorRT is required for --trt. Install with: uv sync --extra trt"
+            )
+        from src.config import CALIB_PATH, TRT_FP8_PATH, TRT_FP16_PATH, TRT_INT8_PATH
+        from src.trt import TRTModel, build_trt_engine, save_calib_data
+
         save_calib_data(calib_loader, n_samples=200, calib_path=CALIB_PATH)
 
         print("\nBuilding TRT FP16 engine…")
@@ -135,6 +155,7 @@ def main():
             dataset,
             batch_size=bs,
             shuffle=False,
+            drop_last=True,
             num_workers=4,
             pin_memory=(DEVICE.type == "cuda"),
             worker_init_fn=set_seed,
@@ -175,8 +196,9 @@ def main():
             args.profile,
         )
 
+        logger.info("\nApplying INT8 static activation + weight quantization (torchao)…")
         run_benchmark(
-            apply_int8(model),
+            apply_int8(model, calib_dataloader=dataloader),
             dataloader,
             DEVICE,
             f"int8_torchao_bs{bs}",
@@ -214,6 +236,43 @@ def main():
                 precision,
                 args.profile,
             )
+
+        if args.tvm:
+            from src.config import ONNX_PATH
+            from src.tvm import run_tvm_benchmark
+            
+            logger.info("\n── TVM FP16 ──")
+            tvm_fp16_results = run_tvm_benchmark(
+                onnx_path=ONNX_PATH,
+                cache_path=CACHE_PATH,
+                precision="fp16",
+                batch_size=bs,
+                num_workers=4,
+                max_batches=0, # run all batches from the cache
+                tune=args.tvm_tune,
+                tune_trials=args.tvm_tune_trials,
+            )
+            tvm_fp16_results["pipeline_name"] = f"tvm_fp16_bs{bs}"
+            summary_path = RESULTS_DIR / "summary.json"
+            existing = json.loads(summary_path.read_text()) if summary_path.exists() else []
+            existing.append(tvm_fp16_results)
+            summary_path.write_text(json.dumps(existing, indent=2))
+
+            logger.info("\n── TVM FP32 ──")
+            tvm_fp32_results = run_tvm_benchmark(
+                onnx_path=ONNX_PATH,
+                cache_path=CACHE_PATH,
+                precision="fp32",
+                batch_size=bs,
+                num_workers=4,
+                max_batches=0, # run all batches from the cache
+                tune=args.tvm_tune,
+                tune_trials=args.tvm_tune_trials,
+            )
+            tvm_fp32_results["pipeline_name"] = f"tvm_fp32_bs{bs}"
+            existing = json.loads(summary_path.read_text()) if summary_path.exists() else []
+            existing.append(tvm_fp32_results)
+            summary_path.write_text(json.dumps(existing, indent=2))
 
     summary_path = RESULTS_DIR / "summary.json"
     results = [BenchmarkResult(**d) for d in json.loads(summary_path.read_text())]

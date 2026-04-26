@@ -4,7 +4,7 @@ from typing import Callable
 import torch
 from loguru import logger
 from torchao.quantization import (Float8WeightOnlyConfig,
-                                  Int8DynamicActivationInt8WeightConfig,
+                                  Int8StaticActivationInt8WeightConfig,
                                   quantize_)
 
 from src.config import CKPT_PATH, IMG_SCALE
@@ -89,10 +89,22 @@ def apply_compiled(model):
     return torch.compile(model, mode="max-autotune-no-cudagraphs")
 
 
-def apply_int8(model):
-    """INT8 dynamic activation + weight quantization via torchao (GPU)."""
+def apply_int8(model, calib_dataloader=None):
+    """INT8 static activation + weight quantization via torchao (GPU).
+    
+    If *calib_dataloader* is provided, a few batches are forwarded to
+    collect activation statistics for static quantization.
+    """
     model = copy.deepcopy(model).cuda().eval()
-    quantize_(model, Int8DynamicActivationInt8WeightConfig())
+    quantize_(model, Int8StaticActivationInt8WeightConfig())
+    # Calibration: run representative data to collect activation statistics
+    if calib_dataloader is not None:
+        with torch.no_grad():
+            for i, (images, _) in enumerate(calib_dataloader):
+                images = images.cuda()
+                model(images)
+                if i >= 2:  # A few batches is enough for calibration
+                    break
     return model
 
 
