@@ -296,9 +296,21 @@ def main():
             except Exception as e:
                 logger.error(f"TVM FP32 benchmark failed: {e}")
 
+    # Clean up legacy keys that don't match BenchmarkResult schema
+    allowed_keys = {
+        "pipeline_name", "precision", "device", "batch_size", "num_batches", "total_samples",
+        "latency_mean_ms", "latency_std_ms", "latency_p50_ms", "latency_p95_ms", "latency_p99_ms",
+        "throughput_samples_per_sec", "model_params_M", "model_size_MB", "peak_gpu_memory_MB",
+        "miou", "dice"
+    }
+
     summary_path = RESULTS_DIR / "summary.json"
-    results = [BenchmarkResult(**d) for d in json.loads(summary_path.read_text())]
-    print_results(results)
+    results_list = []
+    for d in json.loads(summary_path.read_text()):
+        filtered_d = {k: v for k, v in d.items() if k in allowed_keys}
+        results_list.append(BenchmarkResult(**filtered_d))
+        
+    print_results(results_list)
     print(f"\nFull results saved to {summary_path}")
 
 
