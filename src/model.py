@@ -3,9 +3,11 @@ from typing import Callable
 
 import torch
 from loguru import logger
-from torchao.quantization import (Float8WeightOnlyConfig,
-                                  Int8StaticActivationInt8WeightConfig,
-                                  quantize_)
+from torchao.quantization import (
+    Float8WeightOnlyConfig,
+    Int8StaticActivationInt8WeightConfig,
+    quantize_,
+)
 
 from src.config import CKPT_PATH, IMG_SCALE
 

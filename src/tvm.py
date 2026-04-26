@@ -7,7 +7,6 @@ delegates all TVM work to a subprocess running under Python 3.11.
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 from loguru import logger

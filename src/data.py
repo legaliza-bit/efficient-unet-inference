@@ -1,4 +1,3 @@
-import json
 import subprocess
 import zipfile
 from pathlib import Path
@@ -11,8 +10,16 @@ from torch.utils.data import Dataset, random_split
 from torchvision import tv_tensors
 from torchvision.transforms import v2
 
-from src.config import (BENCH_N_SAMPLES, CACHE_PATH, COMPETITION, DATA_DIR,
-                        GDRIVE_FILE_ID, IMG_SCALE, IMGS_DIR, MASKS_DIR)
+from src.config import (
+    BENCH_N_SAMPLES,
+    CACHE_PATH,
+    COMPETITION,
+    DATA_DIR,
+    GDRIVE_FILE_ID,
+    IMG_SCALE,
+    IMGS_DIR,
+    MASKS_DIR,
+)
 
 
 def _train_augmentations() -> v2.Compose:

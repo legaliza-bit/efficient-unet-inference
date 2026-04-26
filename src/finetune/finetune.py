@@ -1,13 +1,19 @@
 import copy
-import random
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.config import (BATCH_SIZE, CKPT_PATH, DEVICE, FINETUNE_EPOCHS, LR,
-                        NUM_CLASSES, QAT_CKPT_PATH, QAT_EPOCHS)
+from src.config import (
+    BATCH_SIZE,
+    CKPT_PATH,
+    DEVICE,
+    FINETUNE_EPOCHS,
+    LR,
+    NUM_CLASSES,
+    QAT_CKPT_PATH,
+    QAT_EPOCHS,
+)
 from src.data import get_carvana
 from src.finetune.losses import CombinedLoss
 from src.metrics import mean_iou
@@ -118,8 +124,10 @@ def finetune(model, num_classes=NUM_CLASSES, save_path=CKPT_PATH):
 def finetune_qat(model, num_classes=NUM_CLASSES, save_path=QAT_CKPT_PATH):
     """Finetune with fake quantization nodes (QAT), convert to int8, save."""
     from torch.ao.quantization import get_default_qat_qconfig_mapping
-    from torch.ao.quantization.quantize_fx import (convert_fx,  # noqa: PLC0415
-                                                   prepare_qat_fx)
+    from torch.ao.quantization.quantize_fx import (  # noqa: PLC0415
+        convert_fx,
+        prepare_qat_fx,
+    )
 
     model = copy.deepcopy(model).cpu().train()
 

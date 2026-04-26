@@ -6,12 +6,29 @@ from loguru import logger
 from torch.utils.data import DataLoader
 
 from src.benchmark import BenchmarkResult, run_benchmark
-from src.config import (BATCH_SIZE, BENCH_N_SAMPLES, CACHE_PATH, DATA_DIR,
-                        DEVICE, RESULTS_DIR)
-from src.data import (CachedDataset, download_bench_cache, download_carvana,
-                      prepare_benchmark_cache)
+from src.config import (
+    BATCH_SIZE,
+    BENCH_N_SAMPLES,
+    CACHE_PATH,
+    DATA_DIR,
+    DEVICE,
+    RESULTS_DIR,
+)
+from src.data import (
+    CachedDataset,
+    download_bench_cache,
+    download_carvana,
+    prepare_benchmark_cache,
+)
 from src.finetune.finetune import finetune, finetune_qat
-from src.model import apply_compiled, apply_fp8, apply_int8, apply_pruning, apply_sparse_2_4, load_model
+from src.model import (
+    apply_compiled,
+    apply_fp8,
+    apply_int8,
+    apply_pruning,
+    apply_sparse_2_4,
+    load_model,
+)
 from src.utils import print_results, set_seed
 
 

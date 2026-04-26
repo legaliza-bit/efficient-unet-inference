@@ -40,6 +40,7 @@ os.environ["LD_LIBRARY_PATH"] = (
 
 # Initialize CUDA driver API before TVM uses it
 import ctypes
+
 try:
     ctypes.CDLL("libcuda.so.1").cuInit(0)
 except Exception:
@@ -56,15 +57,15 @@ if _script_dir in sys.path:
 
 import numpy as np
 import torch
-from PIL import Image
-from torch.utils.data import Dataset, random_split
+from torch.utils.data import Dataset
+from tvm.contrib import graph_executor
 
 import tvm
 from tvm import relay
-from tvm.contrib import graph_executor
 
 # TVM 0.12.0 compat: Sequential moved from relay.transform to tvm.transform
 from tvm import transform as _tvm_transform
+
 if not hasattr(relay.transform, "Sequential"):
     relay.transform.Sequential = _tvm_transform.Sequential
 
@@ -222,8 +223,9 @@ def auto_tune(relay_mod, params, target, dev, log_file, tune_trials=1000):
     than treated as complete, which avoids silently skipping tuning after an
     interrupted run.
     """
-    from tvm import autotvm
     from tvm.autotvm.record import pick_best
+
+    from tvm import autotvm
 
     tasks = autotvm.task.extract_from_program(
         relay_mod["main"], target=target, params=params
