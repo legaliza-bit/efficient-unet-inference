@@ -1,15 +1,34 @@
-import torch 
 from pathlib import Path
+
+import torch
+
+COMPETITION = "carvana-image-masking-challenge"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TMP_DIR = PROJECT_ROOT / "tmp"
 DATA_DIR = PROJECT_ROOT / "data"
-CKPT_PATH = TMP_DIR / "unet_finetuned.pt"
+IMGS_DIR = DATA_DIR / "train"
+MASKS_DIR = DATA_DIR / "train_masks"
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-IMG_SIZE = 256
-BATCH_SIZE = 16
+CKPT_PATH = TMP_DIR / "unet_carvana.pt"
+QAT_CKPT_PATH = TMP_DIR / "unet_carvana_qat.pt"
+ONNX_PATH = TMP_DIR / "unet_carvana.onnx"
+TRT_FP16_PATH = TMP_DIR / "unet_carvana_fp16.engine"
+TRT_FP8_PATH = TMP_DIR / "unet_carvana_fp8.engine"
+TRT_INT8_PATH = TMP_DIR / "unet_carvana_int8.engine"
+CALIB_PATH = TMP_DIR / "calib_data.npy"
+
+DEVICE = torch.device("cuda:0")
+PROFILE_DIR = TMP_DIR / "profiles"
+RESULTS_DIR = TMP_DIR / "results"
+CACHE_PATH = TMP_DIR / "bench_cache.pt"
+GDRIVE_FILE_ID = "1lNE7nALPutfB4StfAdQcsqxGvkzJ0g0Y"
+
+IMG_SCALE = 0.5
+BATCH_SIZE = 8
+NUM_CLASSES = 2
+BENCH_N_SAMPLES = 500
+
 FINETUNE_EPOCHS = 30
+QAT_EPOCHS = 5
 LR = 1e-4
-WARMUP_ITERS = 20
-DATASET_CACHE = {}
